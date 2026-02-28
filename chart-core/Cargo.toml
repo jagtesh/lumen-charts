@@ -1,0 +1,15 @@
+[package]
+name = "chart-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+vello = "0.4"
+parley = "0.7"
+pollster = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+env_logger = "0.11"
