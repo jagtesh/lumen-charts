@@ -198,26 +198,31 @@ class ToolbarView: NSView {
         x += 80
 
         let typeControl = NSSegmentedControl(
-            labels: ["OHLC", "Candle", "Line"],
+            labels: ["OHLC", "Candle", "Line", "Area", "Hist", "Base"],
             trackingMode: .selectOne,
             target: self,
             action: #selector(seriesTypeChanged(_:))
         )
         typeControl.selectedSegment = 0
-        typeControl.frame = NSRect(x: x, y: 4, width: 200, height: 24)
+        typeControl.frame = NSRect(x: x, y: 4, width: 330, height: 24)
         typeControl.segmentStyle = .roundRect
         addSubview(typeControl)
-        x += 210
+        x += 340
 
         // Actions
         let fitBtn = makeButton("Fit Content", action: #selector(fitContentTapped))
-        fitBtn.frame = NSRect(x: x, y: 4, width: 100, height: 24)
+        fitBtn.frame = NSRect(x: x, y: 4, width: 90, height: 24)
         addSubview(fitBtn)
-        x += 110
+        x += 100
+
+        let overlayBtn = makeButton("Toggle Overlay", action: #selector(toggleOverlayTapped))
+        overlayBtn.frame = NSRect(x: x, y: 4, width: 110, height: 24)
+        addSubview(overlayBtn)
+        x += 120
 
         // Status
         statusLabel = makeLabel("OHLC Bars  •  100 bars from Swift")
-        statusLabel.frame = NSRect(x: x, y: 6, width: 400, height: 20)
+        statusLabel.frame = NSRect(x: x, y: 6, width: 300, height: 20)
         statusLabel.textColor = NSColor(calibratedWhite: 0.5, alpha: 1.0)
         addSubview(statusLabel)
     }
@@ -225,12 +230,15 @@ class ToolbarView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     @objc func seriesTypeChanged(_ sender: NSSegmentedControl) {
-        let names = ["OHLC Bars", "Candlestick", "Line"]
+        let names = ["OHLC Bars", "Candlestick", "Line", "Area", "Histogram", "Baseline"]
         statusLabel.stringValue = "\(names[sender.selectedSegment])  •  data from Swift"
         onSeriesTypeChanged?(UInt32(sender.selectedSegment))
     }
 
     @objc func fitContentTapped() { onFitContent?() }
+    
+    var onToggleOverlay: (() -> Void)?
+    @objc func toggleOverlayTapped() { onToggleOverlay?() }
 
     private func makeLabel(_ text: String) -> NSTextField {
         let l = NSTextField(labelWithString: text)
@@ -256,6 +264,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var chartView: ChartView!
     var toolbar: ToolbarView!
     let toolbarHeight: CGFloat = 32
+    var overlaySeriesId: UInt32?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let rect = NSRect(x: 100, y: 100, width: 1000, height: 732)
@@ -295,6 +304,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         toolbar.onFitContent = { [weak self] in
             guard let chart = self?.chartView.chart else { return }
             if chart_fit_content(chart) { chart_render(chart) }
+        }
+
+        toolbar.onToggleOverlay = { [weak self] in
+            guard let self = self, let chart = self.chartView.chart else { return }
+            if let id = self.overlaySeriesId {
+                // Remove existing overlay
+                chart_remove_series(chart, id)
+                self.overlaySeriesId = nil
+                chart_render(chart)
+            } else {
+                // Add new overlay (mock moving average of the same data)
+                let baseData = generateSampleData() // [time, o, h, l, c]
+                var times: [Int64] = []
+                var values: [Double] = []
+                for i in stride(from: 0, to: baseData.count, by: 5) {
+                    times.append(Int64(baseData[i]))
+                    // mock MA by simply shifting the close up a bit
+                    values.append(baseData[i+4] + 5.0)
+                }
+                
+                let id = chart_add_line_series(chart, times, values, UInt32(times.count))
+                if id != UInt32.max {
+                    self.overlaySeriesId = id
+                    chart_render(chart)
+                }
+            }
         }
 
         window.makeKeyAndOrderFront(nil)

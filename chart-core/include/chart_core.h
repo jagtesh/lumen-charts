@@ -33,4 +33,9 @@ uint32_t chart_bar_count(Chart* chart);
 // Series type (0=OHLC, 1=Candlestick, 2=Line)
 bool chart_set_series_type(Chart* chart, uint32_t series_type);
 
+// Multi-series management
+uint32_t chart_add_line_series(Chart* chart, const int64_t* times, const double* values, uint32_t count);
+bool chart_remove_series(Chart* chart, uint32_t series_id);
+uint32_t chart_series_count(const Chart* chart);
+
 #endif // CHART_CORE_H
