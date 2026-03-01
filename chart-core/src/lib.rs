@@ -400,6 +400,172 @@ mod native {
         chart.state.series.add(series)
     }
 
+    /// Add a new OHLC series to the chart.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_add_ohlc_series(
+        chart: *mut Chart,
+        times: *const i64,
+        opens: *const f64,
+        highs: *const f64,
+        lows: *const f64,
+        closes: *const f64,
+        count: u32,
+    ) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let times = unsafe { std::slice::from_raw_parts(times, count as usize) };
+        let opens = unsafe { std::slice::from_raw_parts(opens, count as usize) };
+        let highs = unsafe { std::slice::from_raw_parts(highs, count as usize) };
+        let lows = unsafe { std::slice::from_raw_parts(lows, count as usize) };
+        let closes = unsafe { std::slice::from_raw_parts(closes, count as usize) };
+
+        let mut bars = Vec::with_capacity(count as usize);
+        for i in 0..(count as usize) {
+            bars.push(crate::chart_model::OhlcBar {
+                time: times[i],
+                open: opens[i],
+                high: highs[i],
+                low: lows[i],
+                close: closes[i],
+            });
+        }
+
+        let series = crate::series::Series::ohlc(0, bars);
+        chart.state.series.add(series)
+    }
+
+    /// Add a new Candlestick series to the chart.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_add_candlestick_series(
+        chart: *mut Chart,
+        times: *const i64,
+        opens: *const f64,
+        highs: *const f64,
+        lows: *const f64,
+        closes: *const f64,
+        count: u32,
+    ) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let times = unsafe { std::slice::from_raw_parts(times, count as usize) };
+        let opens = unsafe { std::slice::from_raw_parts(opens, count as usize) };
+        let highs = unsafe { std::slice::from_raw_parts(highs, count as usize) };
+        let lows = unsafe { std::slice::from_raw_parts(lows, count as usize) };
+        let closes = unsafe { std::slice::from_raw_parts(closes, count as usize) };
+
+        let mut bars = Vec::with_capacity(count as usize);
+        for i in 0..(count as usize) {
+            bars.push(crate::chart_model::OhlcBar {
+                time: times[i],
+                open: opens[i],
+                high: highs[i],
+                low: lows[i],
+                close: closes[i],
+            });
+        }
+
+        let series = crate::series::Series::candlestick(0, bars);
+        chart.state.series.add(series)
+    }
+
+    /// Add a new area series to the chart.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_add_area_series(
+        chart: *mut Chart,
+        times: *const i64,
+        values: *const f64,
+        count: u32,
+    ) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let times = unsafe { std::slice::from_raw_parts(times, count as usize) };
+        let values = unsafe { std::slice::from_raw_parts(values, count as usize) };
+
+        let points: Vec<crate::series::LineDataPoint> = times
+            .iter()
+            .zip(values.iter())
+            .map(|(&t, &v)| crate::series::LineDataPoint { time: t, value: v })
+            .collect();
+
+        let series = crate::series::Series::area(0, points);
+        chart.state.series.add(series)
+    }
+
+    /// Add a new baseline series to the chart.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_add_baseline_series(
+        chart: *mut Chart,
+        times: *const i64,
+        values: *const f64,
+        count: u32,
+        base_value: f64,
+    ) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let times = unsafe { std::slice::from_raw_parts(times, count as usize) };
+        let values = unsafe { std::slice::from_raw_parts(values, count as usize) };
+
+        let points: Vec<crate::series::LineDataPoint> = times
+            .iter()
+            .zip(values.iter())
+            .map(|(&t, &v)| crate::series::LineDataPoint { time: t, value: v })
+            .collect();
+
+        let series = crate::series::Series::baseline(0, points, base_value);
+        chart.state.series.add(series)
+    }
+
+    /// Add a new histogram series to the chart.
+    /// `colors` can be null. If provided, length must equal `count`. Format: 0xRRGGBBAA.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_add_histogram_series(
+        chart: *mut Chart,
+        times: *const i64,
+        values: *const f64,
+        colors: *const u32,
+        count: u32,
+    ) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let times = unsafe { std::slice::from_raw_parts(times, count as usize) };
+        let values = unsafe { std::slice::from_raw_parts(values, count as usize) };
+        let colors_slice = if colors.is_null() || count == 0 {
+            None
+        } else {
+            Some(unsafe { std::slice::from_raw_parts(colors, count as usize) })
+        };
+
+        let mut points = Vec::with_capacity(count as usize);
+        for i in 0..(count as usize) {
+            let color = colors_slice.map(|slice| {
+                let c = slice[i];
+                let r = ((c >> 24) & 0xFF) as f32 / 255.0;
+                let g = ((c >> 16) & 0xFF) as f32 / 255.0;
+                let b = ((c >> 8) & 0xFF) as f32 / 255.0;
+                let a = (c & 0xFF) as f32 / 255.0;
+                [r, g, b, a]
+            });
+            points.push(crate::series::HistogramDataPoint {
+                time: times[i],
+                value: values[i],
+                color,
+            });
+        }
+
+        let series = crate::series::Series::histogram(0, points);
+        chart.state.series.add(series)
+    }
+
     /// Remove a series by its ID. Returns true if the series was found and removed.
     #[unsafe(no_mangle)]
     pub extern "C" fn chart_remove_series(chart: *mut Chart, series_id: u32) -> bool {

@@ -314,17 +314,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.overlaySeriesId = nil
                 chart_render(chart)
             } else {
-                // Add new overlay (mock moving average of the same data)
+                // Add new overlay (mock moving average of the same data as an Area series)
                 let baseData = generateSampleData() // [time, o, h, l, c]
                 var times: [Int64] = []
                 var values: [Double] = []
                 for i in stride(from: 0, to: baseData.count, by: 5) {
                     times.append(Int64(baseData[i]))
-                    // mock MA by simply shifting the close up a bit
-                    values.append(baseData[i+4] + 5.0)
+                    values.append(baseData[i+4] - 15.0) // Lower area series
                 }
                 
-                let id = chart_add_line_series(chart, times, values, UInt32(times.count))
+                let id = chart_add_area_series(chart, times, values, UInt32(times.count))
                 if id != UInt32.max {
                     self.overlaySeriesId = id
                     chart_render(chart)

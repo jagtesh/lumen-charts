@@ -34,7 +34,12 @@ uint32_t chart_bar_count(Chart* chart);
 bool chart_set_series_type(Chart* chart, uint32_t series_type);
 
 // Multi-series management
+uint32_t chart_add_ohlc_series(Chart* chart, const int64_t* times, const double* opens, const double* highs, const double* lows, const double* closes, uint32_t count);
+uint32_t chart_add_candlestick_series(Chart* chart, const int64_t* times, const double* opens, const double* highs, const double* lows, const double* closes, uint32_t count);
 uint32_t chart_add_line_series(Chart* chart, const int64_t* times, const double* values, uint32_t count);
+uint32_t chart_add_area_series(Chart* chart, const int64_t* times, const double* values, uint32_t count);
+uint32_t chart_add_baseline_series(Chart* chart, const int64_t* times, const double* values, uint32_t count, double base_value);
+uint32_t chart_add_histogram_series(Chart* chart, const int64_t* times, const double* values, const uint32_t* colors, uint32_t count);
 bool chart_remove_series(Chart* chart, uint32_t series_id);
 uint32_t chart_series_count(const Chart* chart);
 

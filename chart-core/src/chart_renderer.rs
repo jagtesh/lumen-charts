@@ -1,5 +1,5 @@
-use vello::kurbo::{Affine, Line, Rect as KurboRect, Stroke};
-use vello::peniko::{Color, Font};
+use vello::kurbo::{Affine, BezPath, Line, Rect as KurboRect, Stroke};
+use vello::peniko::{Brush, Color, ColorStops, Font, Gradient};
 use vello::Scene;
 
 use crate::chart_model::Rect;
@@ -44,12 +44,20 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
     match state.active_series_type {
         SeriesType::Ohlc => draw_ohlc_bars(scene, state, t),
         SeriesType::Candlestick => draw_candlestick_bars(scene, state, t),
-        SeriesType::Line | SeriesType::Area | SeriesType::Baseline => {
-            draw_line_series_from_ohlc(scene, state, t);
-            // Area/Baseline get additional fill rendering (TODO: gradient fill)
+        SeriesType::Line => draw_line_series_from_ohlc(scene, state, t),
+        SeriesType::Area => {
+            // Adapt OHLC to LineDataPoints for area renderer
+            let points = ohlc_to_line_points(&state.data.bars);
+            let opts = crate::series::AreaSeriesOptions::default();
+            draw_area_series(scene, state, &points, &opts, t);
+        }
+        SeriesType::Baseline => {
+            let points = ohlc_to_line_points(&state.data.bars);
+            let opts = crate::series::BaselineSeriesOptions::default();
+            draw_baseline_series(scene, state, &points, &opts, t);
         }
         SeriesType::Histogram => {
-            // Histogram from OHLC shows as line for now
+            // Histogram from OHLC shows as line for now (since we don't have base/colors from OHLC)
             draw_line_series_from_ohlc(scene, state, t);
         }
     }
@@ -60,10 +68,14 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
             continue;
         }
         match (&series.series_type, &series.data) {
-            (SeriesType::Line, SeriesData::Line(pts))
-            | (SeriesType::Area, SeriesData::Line(pts))
-            | (SeriesType::Baseline, SeriesData::Line(pts)) => {
+            (SeriesType::Line, SeriesData::Line(pts)) => {
                 draw_line_series(scene, state, pts, &series.line_options, t);
+            }
+            (SeriesType::Area, SeriesData::Line(pts)) => {
+                draw_area_series(scene, state, pts, &series.area_options, t);
+            }
+            (SeriesType::Baseline, SeriesData::Line(pts)) => {
+                draw_baseline_series(scene, state, pts, &series.baseline_options, t);
             }
             (SeriesType::Candlestick, SeriesData::Ohlc(bars)) => {
                 draw_candlestick_bars_data(scene, state, bars, &series.candlestick_options, t);
@@ -809,6 +821,184 @@ fn draw_line_series(
             scene.fill(vello::peniko::Fill::NonZero, t, color, None, &circle);
         }
     }
+}
+
+/// Helper to convert OHLC to LineDataPoints
+fn ohlc_to_line_points(bars: &[crate::chart_model::OhlcBar]) -> Vec<crate::series::LineDataPoint> {
+    bars.iter()
+        .map(|b| crate::series::LineDataPoint {
+            time: b.time,
+            value: b.close,
+        })
+        .collect()
+}
+
+/// Draw an area series (filled gradient below a line)
+fn draw_area_series(
+    scene: &mut Scene,
+    state: &ChartState,
+    points: &[crate::series::LineDataPoint],
+    opts: &crate::series::AreaSeriesOptions,
+    t: Affine,
+) {
+    if points.len() < 2 {
+        return;
+    }
+
+    let plot_area = &state.layout.plot_area;
+    let stroke = Stroke::new(opts.line_width as f64);
+    let line_color = Color::new(opts.line_color);
+
+    let mut path = BezPath::new();
+    let mut lowest_y = 0.0; // The lowest y value on screen (highest price)
+
+    // 1. Draw the stroke line and build the top edge of the fill path
+    for i in 0..points.len() - 1 {
+        let x1 = state.time_scale.index_to_x(i, plot_area);
+        let x2 = state.time_scale.index_to_x(i + 1, plot_area);
+        let y1 = state.price_scale.price_to_y(points[i].value, plot_area);
+        let y2 = state.price_scale.price_to_y(points[i + 1].value, plot_area);
+
+        if i == 0 {
+            path.move_to((x1 as f64, y1 as f64));
+            lowest_y = y1;
+        }
+        path.line_to((x2 as f64, y2 as f64));
+        lowest_y = lowest_y.min(y2);
+
+        scene.stroke(
+            &stroke,
+            t,
+            line_color,
+            None,
+            &Line::new((x1 as f64, y1 as f64), (x2 as f64, y2 as f64)),
+        );
+    }
+
+    // 2. Complete the fill path by tracing down to the bottom of the chart
+    let last_idx = points.len() - 1;
+    let first_x = state.time_scale.index_to_x(0, plot_area);
+    let last_x = state.time_scale.index_to_x(last_idx, plot_area);
+    let bottom_y = plot_area.height; // Bottom edge of the plot area
+
+    path.line_to((last_x as f64, bottom_y as f64));
+    path.line_to((first_x as f64, bottom_y as f64));
+    path.close_path();
+
+    // 3. Fill with a linear gradient
+    let top_color = Color::new(opts.top_color);
+    let bottom_color = Color::new(opts.bottom_color);
+    let gradient = Gradient::new_linear((0.0, lowest_y as f64), (0.0, bottom_y as f64))
+        .with_stops([(0.0, top_color), (1.0, bottom_color)]);
+
+    scene.fill(
+        vello::peniko::Fill::NonZero,
+        t,
+        &Brush::Gradient(gradient),
+        None,
+        &path,
+    );
+}
+
+/// Draw a baseline series (filled areas above and below a baseline)
+fn draw_baseline_series(
+    scene: &mut Scene,
+    state: &ChartState,
+    points: &[crate::series::LineDataPoint],
+    opts: &crate::series::BaselineSeriesOptions,
+    t: Affine,
+) {
+    if points.len() < 2 {
+        return;
+    }
+
+    let plot_area = &state.layout.plot_area;
+    let base_y = state.price_scale.price_to_y(opts.base_value, plot_area);
+
+    let top_stroke = Stroke::new(opts.line_width as f64);
+    let bottom_stroke = Stroke::new(opts.line_width as f64);
+    let top_line_color = Color::new(opts.top_line_color);
+    let bottom_line_color = Color::new(opts.bottom_line_color);
+
+    // We will build two paths: one for the top area, one for the bottom area
+    // A more precise renderer would intersect the line segments exactly at base_y,
+    // but drawing the whole paths and using clipping/gradient trick is simpler for MVP.
+    // Here we'll just use the line strokes + two gradient fills that start/end at base_y.
+
+    let mut path = BezPath::new();
+    for i in 0..points.len() - 1 {
+        let x1 = state.time_scale.index_to_x(i, plot_area);
+        let x2 = state.time_scale.index_to_x(i + 1, plot_area);
+        let y1 = state.price_scale.price_to_y(points[i].value, plot_area);
+        let y2 = state.price_scale.price_to_y(points[i + 1].value, plot_area);
+
+        if i == 0 {
+            path.move_to((x1 as f64, y1 as f64));
+        }
+        path.line_to((x2 as f64, y2 as f64));
+
+        // Draw stroke segment. Technically we should split the stroked line at base_y
+        // to assign top_line_color vs bottom_line_color. For simplicity, we just color
+        // the segment based on its midpoint.
+        let mid_y = (y1 + y2) / 2.0;
+        let line_color = if mid_y <= base_y {
+            top_line_color
+        } else {
+            bottom_line_color
+        };
+        scene.stroke(
+            &(if mid_y <= base_y {
+                top_stroke.clone()
+            } else {
+                bottom_stroke.clone()
+            }),
+            t,
+            line_color,
+            None,
+            &Line::new((x1 as f64, y1 as f64), (x2 as f64, y2 as f64)),
+        );
+    }
+
+    // Complete the path back to base_y for the fill
+    let last_idx = points.len() - 1;
+    let first_x = state.time_scale.index_to_x(0, plot_area);
+    let last_x = state.time_scale.index_to_x(last_idx, plot_area);
+
+    path.line_to((last_x as f64, base_y as f64));
+    path.line_to((first_x as f64, base_y as f64));
+    path.close_path();
+
+    // The single path represents the deviation from the baseline.
+    // We can fill it with a multi-stop gradient split strictly at base_y.
+
+    // Determine screen bounds to calculate gradient stops
+    let min_y = 0.0;
+    let max_y = plot_area.height as f64;
+    let range = max_y - min_y;
+    let base_t = ((base_y as f64 - min_y) / range).clamp(0.0, 1.0) as f32;
+
+    let top_fill_color = Color::new(opts.top_fill_color);
+    let bottom_fill_color = Color::new(opts.bottom_fill_color);
+
+    // The gradient goes from chart top to chart bottom.
+    // From top to base_t, it's top_fill_color (fade to transparent at base).
+    // From base_t to bottom, it's bottom_fill_color (transparent at base to filled at bottom).
+    let transparent = Color::new([0.0, 0.0, 0.0, 0.0]);
+
+    let gradient = Gradient::new_linear((0.0, min_y as f64), (0.0, max_y as f64)).with_stops([
+        (0.0, top_fill_color),
+        (base_t - 0.001, transparent),
+        (base_t + 0.001, transparent),
+        (1.0, bottom_fill_color),
+    ]);
+
+    scene.fill(
+        vello::peniko::Fill::NonZero,
+        t,
+        &Brush::Gradient(gradient),
+        None,
+        &path,
+    );
 }
 
 // ---------------------------------------------------------------------------
