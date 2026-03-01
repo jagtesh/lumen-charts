@@ -286,8 +286,7 @@ fn with_chart_ret<T: Default, F: FnOnce(&mut WasmChart) -> T>(f: F) -> T {
 pub fn chart_add_ohlc_series(data: &[f64]) -> u32 {
     let bars = parse_ohlc_data(data);
     with_chart_ret(|chart| {
-        let id = chart.state.series.add(lumen_charts::series::Series::ohlc(0, bars));
-        chart.state.update_price_scale();
+        let id = chart.state.add_series(lumen_charts::series::Series::ohlc(0, bars));
         chart.render();
         id
     })
@@ -298,8 +297,7 @@ pub fn chart_add_ohlc_series(data: &[f64]) -> u32 {
 pub fn chart_add_candlestick_series(data: &[f64]) -> u32 {
     let bars = parse_ohlc_data(data);
     with_chart_ret(|chart| {
-        let id = chart.state.series.add(lumen_charts::series::Series::candlestick(0, bars));
-        chart.state.update_price_scale();
+        let id = chart.state.add_series(lumen_charts::series::Series::candlestick(0, bars));
         chart.render();
         id
     })
@@ -310,8 +308,7 @@ pub fn chart_add_candlestick_series(data: &[f64]) -> u32 {
 pub fn chart_add_line_series(data: &[f64]) -> u32 {
     let pts = parse_line_data(data);
     with_chart_ret(|chart| {
-        let id = chart.state.series.add(lumen_charts::series::Series::line(0, pts));
-        chart.state.update_price_scale();
+        let id = chart.state.add_series(lumen_charts::series::Series::line(0, pts));
         chart.render();
         id
     })
@@ -322,8 +319,7 @@ pub fn chart_add_line_series(data: &[f64]) -> u32 {
 pub fn chart_add_area_series(data: &[f64]) -> u32 {
     let pts = parse_line_data(data);
     with_chart_ret(|chart| {
-        let id = chart.state.series.add(lumen_charts::series::Series::area(0, pts));
-        chart.state.update_price_scale();
+        let id = chart.state.add_series(lumen_charts::series::Series::area(0, pts));
         chart.render();
         id
     })
@@ -335,8 +331,7 @@ pub fn chart_add_baseline_series(data: &[f64], base_value: f64) -> u32 {
     let pts = parse_line_data(data);
     with_chart_ret(|chart| {
         let s = lumen_charts::series::Series::baseline(0, pts, base_value);
-        let id = chart.state.series.add(s);
-        chart.state.update_price_scale();
+        let id = chart.state.add_series(s);
         chart.render();
         id
     })
@@ -347,8 +342,7 @@ pub fn chart_add_baseline_series(data: &[f64], base_value: f64) -> u32 {
 pub fn chart_add_histogram_series(data: &[f64]) -> u32 {
     let pts = parse_histogram_data(data);
     with_chart_ret(|chart| {
-        let id = chart.state.series.add(lumen_charts::series::Series::histogram(0, pts));
-        chart.state.update_price_scale();
+        let id = chart.state.add_series(lumen_charts::series::Series::histogram(0, pts));
         chart.render();
         id
     })
@@ -358,8 +352,7 @@ pub fn chart_add_histogram_series(data: &[f64]) -> u32 {
 #[wasm_bindgen]
 pub fn chart_remove_series(series_id: u32) {
     with_chart(|chart| {
-        chart.state.series.remove(series_id);
-        chart.state.update_price_scale();
+        chart.state.remove_series(series_id);
         true
     });
 }
@@ -671,6 +664,153 @@ pub fn chart_resize(width: u32, height: u32, scale_factor: f64) {
 #[wasm_bindgen]
 pub fn chart_pinch(scale: f32, center_x: f32, center_y: f32) {
     with_chart(|chart| chart.state.pinch(scale, center_x, center_y));
+}
+
+// --- Touch events ---
+
+#[wasm_bindgen]
+pub fn chart_touch_start(id: u32, x: f32, y: f32) {
+    with_chart(|chart| {
+        chart.state.touch_start(lumen_charts::chart_state::TouchPoint { id, x, y })
+    });
+}
+
+#[wasm_bindgen]
+pub fn chart_touch_move(id: u32, x: f32, y: f32) {
+    with_chart(|chart| {
+        chart.state.touch_move(lumen_charts::chart_state::TouchPoint { id, x, y })
+    });
+}
+
+#[wasm_bindgen]
+pub fn chart_touch_end(id: u32) {
+    with_chart(|chart| {
+        let gesture = chart.state.touch_end(id);
+        // Any gesture other than none triggers redraw
+        !matches!(gesture, lumen_charts::chart_state::TouchGesture::None)
+    });
+}
+
+#[wasm_bindgen]
+pub fn chart_touch_tick() {
+    CHART.with(|c| {
+        if let Some(chart) = c.borrow_mut().as_mut() {
+            chart.state.touch_tick();
+        }
+    });
+}
+
+// --- ITimeScaleApi ---
+
+#[wasm_bindgen]
+pub fn chart_time_scale_scroll_to_position(position: f32) {
+    with_chart(|chart| {
+        chart.state.time_scale.scroll_offset = position;
+        chart.state.time_scale.clamp_scroll();
+        chart.state.update_price_scale();
+        chart.state.pending_mask.set_global(lumen_charts::invalidation::InvalidationLevel::Light);
+        true
+    });
+}
+
+#[wasm_bindgen]
+pub fn chart_time_scale_scroll_to_real_time() {
+    with_chart(|chart| {
+        chart.state.time_scale.scroll_offset = 0.0;
+        chart.state.update_price_scale();
+        chart.state.pending_mask.set_global(lumen_charts::invalidation::InvalidationLevel::Light);
+        true
+    });
+}
+
+#[wasm_bindgen]
+pub fn chart_time_scale_reset() {
+    with_chart(|chart| {
+        chart.state.time_scale.fit_content(chart.state.layout.plot_area.width);
+        chart.state.update_price_scale();
+        chart.state.pending_mask.set_global(lumen_charts::invalidation::InvalidationLevel::Light);
+        true
+    });
+}
+
+#[wasm_bindgen]
+pub fn chart_time_scale_width() -> f32 {
+    with_chart_ret(|chart| chart.state.layout.plot_area.width)
+}
+
+#[wasm_bindgen]
+pub fn chart_time_scale_height() -> f32 {
+    with_chart_ret(|chart| chart.state.layout.x_axis_height)
+}
+
+// --- IPriceScaleApi ---
+
+#[wasm_bindgen]
+pub fn chart_price_scale_get_mode() -> u32 {
+    with_chart_ret(|chart| {
+        match chart.state.panes[0].price_scale.mode {
+            lumen_charts::price_scale::PriceScaleMode::Normal => 0,
+            lumen_charts::price_scale::PriceScaleMode::Logarithmic => 1,
+        }
+    })
+}
+
+#[wasm_bindgen]
+pub fn chart_price_scale_set_mode(mode: u32) {
+    with_chart(|chart| {
+        chart.state.panes[0].price_scale.mode = match mode {
+            1 => lumen_charts::price_scale::PriceScaleMode::Logarithmic,
+            _ => lumen_charts::price_scale::PriceScaleMode::Normal,
+        };
+        chart.state.pending_mask.set_global(lumen_charts::invalidation::InvalidationLevel::Full);
+        true
+    });
+}
+
+// --- ISeriesApi ---
+
+#[wasm_bindgen]
+pub fn chart_series_type(series_id: u32) -> u32 {
+    with_chart_ret(|chart| {
+        if let Some(series) = chart.state.series.get(series_id) {
+            match series.series_type {
+                lumen_charts::series::SeriesType::Ohlc => 0,
+                lumen_charts::series::SeriesType::Candlestick => 1,
+                lumen_charts::series::SeriesType::Line => 2,
+                lumen_charts::series::SeriesType::Area => 3,
+                lumen_charts::series::SeriesType::Histogram => 4,
+                lumen_charts::series::SeriesType::Baseline => 5,
+            }
+        } else {
+            u32::MAX
+        }
+    })
+}
+
+// --- Options getter ---
+
+#[wasm_bindgen]
+pub fn chart_get_options() -> String {
+    with_chart_ret(|chart| {
+        serde_json::to_string(&chart.state.options).unwrap_or_default()
+    })
+}
+
+// --- Localization ---
+
+#[wasm_bindgen]
+pub fn chart_format_price(price: f64) -> String {
+    format!("{:.2}", price)
+}
+
+#[wasm_bindgen]
+pub fn chart_format_date(timestamp: i64) -> String {
+    lumen_charts::formatters::format_date(timestamp)
+}
+
+#[wasm_bindgen]
+pub fn chart_format_time(timestamp: i64) -> String {
+    lumen_charts::formatters::format_time(timestamp)
 }
 
 // --- Data parsing helpers ---

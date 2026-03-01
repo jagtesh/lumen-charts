@@ -121,4 +121,19 @@ public class SeriesAPI {
         }
         return nil
     }
+
+    /// Get the C-ABI series type code for this series
+    public var typeCode: UInt32 {
+        chart_series_type(chartPtr, id)
+    }
+
+    /// Get data at a specific index
+    public func dataByIndex(_ index: Int32) -> (time: Int64, value: Double)? {
+        var time: Int64 = 0
+        var value: Double = 0
+        if chart_data_by_index(chartPtr, id, index, &time, &value) {
+            return (time, value)
+        }
+        return nil
+    }
 }

@@ -396,4 +396,154 @@ public class Chart {
             chart_apply_options(ptr, cstr)
         }
     }
+
+    /// Get current chart options as JSON string
+    public var options: String? {
+        guard let cstr = chart_get_options(ptr) else { return nil }
+        let s = String(cString: cstr)
+        chart_free_string(cstr)
+        return s
+    }
+
+    // MARK: - Optimized Rendering
+
+    /// Render only if state was invalidated since last render.
+    /// Use in display links / event loops to avoid unnecessary GPU work.
+    @discardableResult
+    public func renderIfNeeded() -> Bool {
+        chart_render_if_needed(ptr)
+    }
+
+    // MARK: - Touch Events
+
+    @discardableResult
+    public func touchStart(id: UInt32, x: Float, y: Float) -> Bool {
+        let redraw = chart_touch_start(ptr, id, x, y)
+        if redraw { render() }
+        return redraw
+    }
+
+    @discardableResult
+    public func touchMove(id: UInt32, x: Float, y: Float) -> Bool {
+        let redraw = chart_touch_move(ptr, id, x, y)
+        if redraw { render() }
+        return redraw
+    }
+
+    @discardableResult
+    public func touchEnd(id: UInt32) -> Bool {
+        let redraw = chart_touch_end(ptr, id)
+        if redraw { render() }
+        return redraw
+    }
+
+    public func touchTick() {
+        chart_touch_tick(ptr)
+    }
+
+    // MARK: - ITimeScaleApi
+
+    /// Scroll to a specific position (rightOffset)
+    public func timeScaleScrollToPosition(_ position: Float, animated: Bool = false) {
+        chart_time_scale_scroll_to_position(ptr, position, animated)
+        render()
+    }
+
+    /// Scroll so the rightmost bar is at the right edge
+    public func timeScaleScrollToRealTime() {
+        chart_time_scale_scroll_to_real_time(ptr)
+        render()
+    }
+
+    /// Get the visible time range
+    public var timeScaleVisibleRange: (from: Int64, to: Int64)? {
+        var from: Int64 = 0, to: Int64 = 0
+        if chart_time_scale_get_visible_range(ptr, &from, &to) {
+            return (from, to)
+        }
+        return nil
+    }
+
+    /// Set the visible time range
+    public func timeScaleSetVisibleRange(from: Int64, to: Int64) {
+        chart_time_scale_set_visible_range(ptr, from, to)
+        render()
+    }
+
+    /// Get the visible logical range
+    public var timeScaleVisibleLogicalRange: (from: Float, to: Float)? {
+        var from: Float = 0, to: Float = 0
+        if chart_time_scale_get_visible_logical_range(ptr, &from, &to) {
+            return (from, to)
+        }
+        return nil
+    }
+
+    /// Set the visible logical range
+    public func timeScaleSetVisibleLogicalRange(from: Float, to: Float) {
+        chart_time_scale_set_visible_logical_range(ptr, from, to)
+        render()
+    }
+
+    /// Reset the time scale to default
+    public func timeScaleReset() {
+        chart_time_scale_reset(ptr)
+        render()
+    }
+
+    /// Width of the time scale area in pixels
+    public var timeScaleWidth: Float {
+        chart_time_scale_width(ptr)
+    }
+
+    /// Height of the time scale area in pixels
+    public var timeScaleHeight: Float {
+        chart_time_scale_height(ptr)
+    }
+
+    // MARK: - IPriceScaleApi
+
+    /// Get the current price scale mode (0=Normal, 1=Logarithmic)
+    public var priceScaleMode: UInt32 {
+        get { chart_price_scale_get_mode(ptr) }
+        set {
+            chart_price_scale_set_mode(ptr, newValue)
+            render()
+        }
+    }
+
+    /// Get the current visible price range
+    public var priceScaleRange: (min: Double, max: Double)? {
+        var min: Double = 0, max: Double = 0
+        if chart_price_scale_get_range(ptr, &min, &max) {
+            return (min, max)
+        }
+        return nil
+    }
+
+    // MARK: - Localization / Formatters
+
+    /// Format a price value using chart locale settings
+    public func formatPrice(_ price: Double) -> String {
+        guard let cstr = chart_format_price(ptr, price) else { return String(price) }
+        let s = String(cString: cstr)
+        chart_free_string(cstr)
+        return s
+    }
+
+    /// Format a date timestamp using chart locale settings
+    public func formatDate(_ timestamp: Int64) -> String {
+        guard let cstr = chart_format_date(ptr, timestamp) else { return "" }
+        let s = String(cString: cstr)
+        chart_free_string(cstr)
+        return s
+    }
+
+    /// Format a time value using chart locale settings
+    public func formatTime(_ timestamp: Int64) -> String {
+        guard let cstr = chart_format_time(ptr, timestamp) else { return "" }
+        let s = String(cString: cstr)
+        chart_free_string(cstr)
+        return s
+    }
 }

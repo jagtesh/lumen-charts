@@ -107,4 +107,42 @@ bool chart_pane_size(const Chart* chart, uint32_t pane_id, float* out_x, float* 
 void chart_subscribe_dbl_click(Chart* chart, ChartEventCallback callback, void* user_data);
 void chart_unsubscribe_dbl_click(Chart* chart);
 
+// Optimized rendering
+bool chart_render_if_needed(Chart* chart);
+
+// Touch events
+bool chart_touch_start(Chart* chart, uint32_t id, float x, float y);
+bool chart_touch_move(Chart* chart, uint32_t id, float x, float y);
+bool chart_touch_end(Chart* chart, uint32_t id);
+void chart_touch_tick(Chart* chart);
+
+// IChartApi
+const char* chart_get_options(Chart* chart);
+void chart_free_string(const char* ptr);
+
+// ITimeScaleApi
+void chart_time_scale_scroll_to_position(Chart* chart, float position, bool animated);
+void chart_time_scale_scroll_to_real_time(Chart* chart);
+bool chart_time_scale_get_visible_range(Chart* chart, int64_t* out_from, int64_t* out_to);
+void chart_time_scale_set_visible_range(Chart* chart, int64_t from, int64_t to);
+bool chart_time_scale_get_visible_logical_range(Chart* chart, float* out_from, float* out_to);
+void chart_time_scale_set_visible_logical_range(Chart* chart, float from, float to);
+void chart_time_scale_reset(Chart* chart);
+float chart_time_scale_width(const Chart* chart);
+float chart_time_scale_height(const Chart* chart);
+
+// ISeriesApi
+uint32_t chart_series_type(const Chart* chart, uint32_t series_id);
+bool chart_data_by_index(const Chart* chart, uint32_t series_id, int32_t index, int64_t* out_time, double* out_value);
+
+// IPriceScaleApi
+uint32_t chart_price_scale_get_mode(const Chart* chart);
+void chart_price_scale_set_mode(Chart* chart, uint32_t mode);
+bool chart_price_scale_get_range(const Chart* chart, double* out_min, double* out_max);
+
+// Localization / Formatters
+const char* chart_format_price(Chart* chart, double price);
+const char* chart_format_date(Chart* chart, int64_t timestamp);
+const char* chart_format_time(Chart* chart, int64_t timestamp);
+
 #endif // CHART_CORE_H
