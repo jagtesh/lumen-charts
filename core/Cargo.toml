@@ -1,13 +1,19 @@
 [package]
 name = "lumen-charts"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Jagtesh Chadha"]
-description = "GPU-accelerated charting library inspired by Lightweight Charts"
+description = "GPU-accelerated charting library inspired by Lightweight Charts, built on Vello + wgpu"
+repository = "https://github.com/nicjbrow/lumen-charts"
+homepage = "https://github.com/nicjbrow/lumen-charts"
+readme = "../README.md"
+keywords = ["chart", "gpu", "vello", "wgpu", "trading"]
+categories = ["graphics", "rendering", "visualization"]
+rust-version = "1.75"
 
 [lib]
-crate-type = ["cdylib", "lib"]
+crate-type = ["cdylib", "staticlib", "lib"]
 
 [dependencies]
 vello = "0.4"
@@ -20,3 +26,4 @@ serde = { version = "1.0", features = ["derive", "alloc"] }
 serde_json = "1.0"
 log = "0.4"
 env_logger = "0.11"
+

@@ -13,6 +13,14 @@ possible, making migration straightforward:
 - **Windows / Linux** — no high-level SDK yet; use the C-ABI directly
   (see [Platform Support](#platform-support))
 
+### Swift Demo (macOS, Metal)
+
+![Swift Demo — Candlestick + Overlay + MACD](assets/swift-demo.png)
+
+### WASM Demo (Chrome, WebGPU)
+
+![WASM Web Demo — Candlestick + MACD](assets/web-demo.png)
+
 ## Project Structure
 
 ```
@@ -42,7 +50,7 @@ cd core && cargo build --release
 
 ```bash
 cd core && cargo build --release
-cd ../examples/swift-demo && swift run
+cd ../examples/swift-demo && swift run ChartDemo
 ```
 
 ### Run the WASM / WebGPU Demo
