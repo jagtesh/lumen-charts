@@ -40,23 +40,24 @@ mod native {
     pub type ChartEventCallback =
         extern "C" fn(param: *const ChartEventParam, user_data: *mut c_void);
 
-    /// Opaque chart handle passed via C-ABI
+    /// Chart handle containing GPU context and chart state.
+    /// Fields are public to allow platform-specific initialization (e.g., WASM canvas).
     pub struct Chart {
-        state: ChartState,
-        scene: Scene,
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        surface: wgpu::Surface<'static>,
-        surface_config: wgpu::SurfaceConfiguration,
-        vello_renderer: VelloRenderer,
+        pub state: ChartState,
+        pub scene: Scene,
+        pub device: wgpu::Device,
+        pub queue: wgpu::Queue,
+        pub surface: wgpu::Surface<'static>,
+        pub surface_config: wgpu::SurfaceConfiguration,
+        pub vello_renderer: VelloRenderer,
 
         /// Cached bottom scene (background + grid + series + axes).
         /// Reused when only the crosshair changes.
-        cached_bottom_scene: Option<Scene>,
+        pub cached_bottom_scene: Option<Scene>,
 
-        click_cb: Option<(ChartEventCallback, *mut c_void)>,
-        crosshair_move_cb: Option<(ChartEventCallback, *mut c_void)>,
-        dbl_click_cb: Option<(ChartEventCallback, *mut c_void)>,
+        pub click_cb: Option<(ChartEventCallback, *mut c_void)>,
+        pub crosshair_move_cb: Option<(ChartEventCallback, *mut c_void)>,
+        pub dbl_click_cb: Option<(ChartEventCallback, *mut c_void)>,
     }
 
     // ----- Lifecycle -----
