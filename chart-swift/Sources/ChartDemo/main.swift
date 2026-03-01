@@ -4,7 +4,7 @@ import Metal
 import CChartCore
 
 class ChartView: NSView {
-    var metalLayer: CAMetalLayer!
+    var metalLayer: CAMetalLayer?
     var chart: OpaquePointer?
     var trackingArea: NSTrackingArea?
     var scaleFactor: Double = 2.0
@@ -12,21 +12,24 @@ class ChartView: NSView {
     override var wantsLayer: Bool { get { true } set {} }
     override var isFlipped: Bool { true }
 
-    override func makeBackingLayer() -> CALayer {
-        metalLayer = CAMetalLayer()
-        metalLayer.device = MTLCreateSystemDefaultDevice()
-        metalLayer.pixelFormat = .bgra8Unorm
-        metalLayer.framebufferOnly = true
-        scaleFactor = Double(NSScreen.main?.backingScaleFactor ?? 2.0)
-        metalLayer.contentsScale = CGFloat(scaleFactor)
-        return metalLayer
-    }
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let _ = window else { return }
+        guard chart == nil else { return } // Already initialized
 
-        let layerPtr = Unmanaged.passUnretained(metalLayer).toOpaque()
+        // Create Metal layer eagerly
+        let ml = CAMetalLayer()
+        ml.device = MTLCreateSystemDefaultDevice()
+        ml.pixelFormat = .bgra8Unorm
+        ml.framebufferOnly = true
+        scaleFactor = Double(NSScreen.main?.backingScaleFactor ?? 2.0)
+        ml.contentsScale = CGFloat(scaleFactor)
+        self.metalLayer = ml
+
+        // Set as the view's layer
+        self.layer = ml
+
+        let layerPtr = Unmanaged.passUnretained(ml).toOpaque()
         let size = bounds.size
         chart = chart_create(
             UInt32(size.width),
@@ -41,6 +44,7 @@ class ChartView: NSView {
         // Setup tracking area for mouse events
         updateTrackingArea()
     }
+
 
     func updateTrackingArea() {
         if let existing = trackingArea {

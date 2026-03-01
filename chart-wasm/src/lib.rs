@@ -2,8 +2,9 @@ use wasm_bindgen::prelude::*;
 use vello::wgpu;
 use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
 
-use chart_core::chart_model::{ChartData, ChartLayout};
+use chart_core::chart_model::ChartData;
 use chart_core::chart_renderer::render_chart;
+use chart_core::chart_state::ChartState;
 use chart_core::sample_data::sample_data;
 
 #[wasm_bindgen(start)]
@@ -96,14 +97,14 @@ pub async fn main() {
     )
     .expect("Failed to create Vello renderer");
 
-    // Build chart data and scene
+    // Build chart state and render
     let data = ChartData {
         bars: sample_data(),
     };
-    let layout = ChartLayout::new(width as f32, height as f32, scale_factor);
+    let state = ChartState::new(data, width as f32, height as f32, scale_factor);
 
     let mut scene = Scene::new();
-    render_chart(&mut scene, &data, &layout);
+    render_chart(&mut scene, &state);
 
     // Render
     let surface_texture = surface
