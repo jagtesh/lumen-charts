@@ -1,6 +1,17 @@
 # Lumen Charts
 
-GPU-accelerated charting library built on [Vello](https://github.com/linebender/vello), inspired by [Lightweight Charts](https://github.com/nicjbrow/lightweight-charts).
+GPU-accelerated charting library built on [Vello](https://github.com/linebender/vello), inspired by [Lightweight Charts](https://github.com/tradingview/lightweight-charts).
+
+The API is designed to stay as close to the original Lightweight Charts API as
+possible, making migration straightforward:
+
+- **Swift SDK** — native API for macOS and iOS (via Metal)
+- **JavaScript API** — available for the WASM target, requires WebGPU support in
+  the browser (Chrome 113+, Safari 18+)
+- **WebGL / Canvas** — planned. Note: a Canvas 2D target may not be worthwhile
+  since you could use Lightweight Charts natively at that point
+- **Windows / Linux** — no high-level SDK yet; use the C-ABI directly
+  (see [Platform Support](#platform-support))
 
 ## Project Structure
 
@@ -125,19 +136,24 @@ Both the Swift and WASM demos support:
 The core uses `wgpu` with automatic backend selection (`Backends::all()`). No
 configuration is needed — the best GPU API is chosen at runtime:
 
-| Platform       | GPU Backend | Surface Source           | Status        |
-|----------------|-------------|--------------------------|---------------|
-| macOS / iOS    | Metal       | `CAMetalLayer`           | ✅ Supported  |
-| Browser (WASM) | WebGPU      | `<canvas>` element       | ✅ Supported  |
-| Windows        | DX12/Vulkan | `HWND`                   | 🔧 Needs SDK  |
-| Linux          | Vulkan      | Wayland/X11 surface      | 🔧 Needs SDK  |
-| Android        | Vulkan      | `ANativeWindow`          | 🔧 Needs SDK  |
+| Platform       | GPU Backend | Surface Source           | SDK                        |
+|----------------|-------------|--------------------------|----------------------------|
+| macOS / iOS    | Metal       | `CAMetalLayer`           | ✅ Swift SDK               |
+| Browser (WASM) | WebGPU      | `<canvas>` element       | ✅ JavaScript API          |
+| Windows        | DX12/Vulkan | `HWND`                   | C-ABI only (no SDK yet)    |
+| Linux          | Vulkan      | Wayland/X11 surface      | C-ABI only (no SDK yet)    |
+| Android        | Vulkan      | `ANativeWindow`          | C-ABI only (no SDK yet)    |
+
+For platforms without a dedicated SDK (Windows, Linux, Android), you work with
+the low-level C-ABI directly via `chart_core.h`. The full C header is at
+`core/include/chart_core.h`. All `chart_*` functions are platform-agnostic — only
+the initial surface creation call differs per platform.
 
 ### Windows (Win32 / HWND)
 
-To embed a chart in a Win32 window, you'd create a `chart_create` variant that
-accepts an `HWND`. The core already links against DX12/Vulkan automatically — only
-the surface creation entry point needs to be platform-specific:
+To embed a chart in a Win32 application, you'd create a `chart_create` variant
+that accepts an `HWND`. The core already links against DX12/Vulkan automatically
+— only the surface creation entry point needs to be platform-specific:
 
 ```c
 #include "chart_core.h"
