@@ -145,4 +145,37 @@ const char* chart_format_price(Chart* chart, double price);
 const char* chart_format_date(Chart* chart, int64_t timestamp);
 const char* chart_format_time(Chart* chart, int64_t timestamp);
 
+// ISeriesApi: Markers
+// markers_json: JSON array e.g. [{"time":1704153600,"shape":"arrowUp","position":"belowBar","color":[0.15,0.65,0.6,1.0],"size":8,"text":"Buy"}]
+// shapes: "arrowUp","arrowDown","circle","square"  positions: "aboveBar","belowBar","atPrice"
+bool chart_series_set_markers(Chart* chart, uint32_t series_id, const char* markers_json);
+const char* chart_series_markers(const Chart* chart, uint32_t series_id);
+
+// ISeriesApi: options()
+const char* chart_series_get_options(const Chart* chart, uint32_t series_id);
+
+// ISeriesApi: barsInLogicalRange
+uint32_t chart_series_bars_in_logical_range(const Chart* chart, uint32_t series_id, float from, float to);
+
+// IPriceScaleApi
+bool chart_price_scale_apply_options(Chart* chart, const char* json_cstr);
+float chart_price_scale_width(const Chart* chart);
+
+// ITimeScaleApi: applyOptions
+bool chart_time_scale_apply_options(Chart* chart, const char* json_cstr);
+
+// Crosshair seriesData (call after crosshair move to get values for all series)
+uint32_t chart_crosshair_get_series_data(const Chart* chart, uint32_t* out_series_ids, double* out_values, uint32_t max_count);
+
+// ITimeScaleApi: Event Subscriptions
+typedef void (*RangeChangeCallback)(double from, double to, void* user_data);
+typedef void (*SizeChangeCallback)(float width, float height, void* user_data);
+
+void chart_time_scale_subscribe_visible_time_range_change(Chart* chart, RangeChangeCallback callback, void* user_data);
+void chart_time_scale_unsubscribe_visible_time_range_change(Chart* chart);
+void chart_time_scale_subscribe_visible_logical_range_change(Chart* chart, RangeChangeCallback callback, void* user_data);
+void chart_time_scale_unsubscribe_visible_logical_range_change(Chart* chart);
+void chart_time_scale_subscribe_size_change(Chart* chart, SizeChangeCallback callback, void* user_data);
+void chart_time_scale_unsubscribe_size_change(Chart* chart);
+
 #endif // CHART_CORE_H

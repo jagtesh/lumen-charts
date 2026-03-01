@@ -37,6 +37,12 @@ pub struct ChartEventParam {
 
 pub type ChartEventCallback = extern "C" fn(param: *const ChartEventParam, user_data: *mut c_void);
 
+/// Callback for range change events: fires with (from, to) values.
+pub type RangeChangeCallback = extern "C" fn(from: f64, to: f64, user_data: *mut c_void);
+
+/// Callback for size change events: fires with (width, height).
+pub type SizeChangeCallback = extern "C" fn(width: f32, height: f32, user_data: *mut c_void);
+
 /// Chart handle containing GPU context and chart state.
 /// Fields are public to allow platform-specific initialization (e.g., WASM canvas).
 pub struct Chart {
@@ -55,6 +61,16 @@ pub struct Chart {
     pub click_cb: Option<(ChartEventCallback, *mut c_void)>,
     pub crosshair_move_cb: Option<(ChartEventCallback, *mut c_void)>,
     pub dbl_click_cb: Option<(ChartEventCallback, *mut c_void)>,
+
+    // Event subscriptions for ITimeScaleApi
+    pub visible_time_range_cb: Option<(RangeChangeCallback, *mut c_void)>,
+    pub visible_logical_range_cb: Option<(RangeChangeCallback, *mut c_void)>,
+    pub size_change_cb: Option<(SizeChangeCallback, *mut c_void)>,
+
+    // Previous state for change detection
+    pub prev_visible_time_range: Option<(i64, i64)>,
+    pub prev_visible_logical_range: Option<(f32, f32)>,
+    pub prev_chart_size: Option<(f32, f32)>,
 }
 
 // ----- Lifecycle -----
@@ -146,6 +162,12 @@ pub extern "C" fn chart_create(
         click_cb: None,
         crosshair_move_cb: None,
         dbl_click_cb: None,
+        visible_time_range_cb: None,
+        visible_logical_range_cb: None,
+        size_change_cb: None,
+        prev_visible_time_range: None,
+        prev_visible_logical_range: None,
+        prev_chart_size: None,
     };
 
     Box::into_raw(Box::new(chart))
@@ -205,6 +227,9 @@ fn render_internal(chart: &mut Chart, level: crate::invalidation::InvalidationLe
         .expect("Vello render failed");
 
     surface_texture.present();
+
+    // Fire any range/size change callbacks
+    fire_change_events(chart);
 }
 
 /// Render the chart unconditionally. Call this after explicit state mutations
@@ -2046,4 +2071,475 @@ pub extern "C" fn chart_format_time(
     std::ffi::CString::new(formatted)
         .unwrap_or_default()
         .into_raw()
+}
+
+// ----- ISeriesApi: Markers -----
+
+/// Set markers on a series from a JSON array string.
+/// JSON format: [{"time":1704153600,"shape":"arrowUp","position":"belowBar","color":[0.15,0.65,0.6,1.0],"size":8,"text":"Buy"}, ...]
+/// Valid shapes: "arrowUp", "arrowDown", "circle", "square"
+/// Valid positions: "aboveBar", "belowBar", "atPrice"
+/// Caller must free json_cstr.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_series_set_markers(
+    chart: *mut Chart,
+    _series_id: u32,
+    markers_json: *const std::os::raw::c_char,
+) -> bool {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+
+    let json_str = unsafe {
+        assert!(!markers_json.is_null());
+        std::ffi::CStr::from_ptr(markers_json)
+    };
+    let json_str = match json_str.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let parsed: Result<Vec<serde_json::Value>, _> = serde_json::from_str(json_str);
+    let items = match parsed {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    let mut markers = Vec::with_capacity(items.len());
+    for item in &items {
+        let time = item.get("time").and_then(|v| v.as_i64()).unwrap_or(0);
+        let shape_str = item
+            .get("shape")
+            .and_then(|v| v.as_str())
+            .unwrap_or("circle");
+        let pos_str = item
+            .get("position")
+            .and_then(|v| v.as_str())
+            .unwrap_or("aboveBar");
+
+        let shape = match shape_str {
+            "arrowUp" => crate::overlays::MarkerShape::ArrowUp,
+            "arrowDown" => crate::overlays::MarkerShape::ArrowDown,
+            "square" => crate::overlays::MarkerShape::Square,
+            _ => crate::overlays::MarkerShape::Circle,
+        };
+        let position = match pos_str {
+            "belowBar" => crate::overlays::MarkerPosition::BelowBar,
+            "atPrice" => crate::overlays::MarkerPosition::AtPrice,
+            _ => crate::overlays::MarkerPosition::AboveBar,
+        };
+
+        let mut marker = crate::overlays::SeriesMarker::new(time, shape, position);
+
+        if let Some(color) = item.get("color").and_then(|v| v.as_array()) {
+            if color.len() == 4 {
+                marker.color = [
+                    color[0].as_f64().unwrap_or(0.0) as f32,
+                    color[1].as_f64().unwrap_or(0.0) as f32,
+                    color[2].as_f64().unwrap_or(0.0) as f32,
+                    color[3].as_f64().unwrap_or(1.0) as f32,
+                ];
+            }
+        }
+        if let Some(size) = item.get("size").and_then(|v| v.as_f64()) {
+            marker.size = size as f32;
+        }
+        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+            marker.text = text.to_string();
+        }
+
+        markers.push(marker);
+    }
+
+    chart.state.overlays.set_markers(markers);
+    chart
+        .state
+        .pending_mask
+        .set_global(crate::invalidation::InvalidationLevel::Full);
+    true
+}
+
+/// Get markers for a series as a JSON string.
+/// Caller must free with chart_free_string.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_series_markers(
+    chart: *const Chart,
+    _series_id: u32,
+) -> *mut std::os::raw::c_char {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &*chart
+    };
+
+    let mut arr = Vec::new();
+    for m in &chart.state.overlays.markers {
+        let shape_str = match m.shape {
+            crate::overlays::MarkerShape::ArrowUp => "arrowUp",
+            crate::overlays::MarkerShape::ArrowDown => "arrowDown",
+            crate::overlays::MarkerShape::Circle => "circle",
+            crate::overlays::MarkerShape::Square => "square",
+        };
+        let pos_str = match m.position {
+            crate::overlays::MarkerPosition::AboveBar => "aboveBar",
+            crate::overlays::MarkerPosition::BelowBar => "belowBar",
+            crate::overlays::MarkerPosition::AtPrice => "atPrice",
+        };
+        arr.push(serde_json::json!({
+            "time": m.time,
+            "shape": shape_str,
+            "position": pos_str,
+            "color": m.color,
+            "size": m.size,
+            "text": m.text,
+        }));
+    }
+
+    let json = serde_json::to_string(&arr).unwrap_or_else(|_| "[]".to_string());
+    std::ffi::CString::new(json).unwrap_or_default().into_raw()
+}
+
+// ----- ISeriesApi: options() -----
+
+/// Get the current options for a series as a JSON string.
+/// Caller must free with chart_free_string.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_series_get_options(
+    chart: *const Chart,
+    series_id: u32,
+) -> *mut std::os::raw::c_char {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &*chart
+    };
+
+    let json = if let Some(series) = chart.state.series.get(series_id) {
+        match series.series_type {
+            crate::series::SeriesType::Ohlc | crate::series::SeriesType::Candlestick => {
+                serde_json::to_string(&series.candlestick_options).unwrap_or_default()
+            }
+            crate::series::SeriesType::Line => {
+                serde_json::to_string(&series.line_options).unwrap_or_default()
+            }
+            crate::series::SeriesType::Area => {
+                serde_json::to_string(&series.area_options).unwrap_or_default()
+            }
+            crate::series::SeriesType::Histogram => {
+                serde_json::to_string(&series.histogram_options).unwrap_or_default()
+            }
+            crate::series::SeriesType::Baseline => {
+                serde_json::to_string(&series.baseline_options).unwrap_or_default()
+            }
+        }
+    } else {
+        "{}".to_string()
+    };
+
+    std::ffi::CString::new(json).unwrap_or_default().into_raw()
+}
+
+// ----- ISeriesApi: barsInLogicalRange -----
+
+/// Returns the number of bars in a series that fall within the given logical index range.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_series_bars_in_logical_range(
+    chart: *const Chart,
+    series_id: u32,
+    from: f32,
+    to: f32,
+) -> u32 {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &*chart
+    };
+
+    if let Some(series) = chart.state.series.get(series_id) {
+        let from_idx = from.floor().max(0.0) as usize;
+        let to_idx = to.ceil().max(0.0) as usize;
+        let data_len = series.data.len();
+        if from_idx >= data_len {
+            return 0;
+        }
+        let to_idx = to_idx.min(data_len);
+        (to_idx - from_idx) as u32
+    } else {
+        0
+    }
+}
+
+// ----- IPriceScaleApi: applyOptions / width -----
+
+/// Apply options to the price scale via JSON.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_price_scale_apply_options(
+    chart: *mut Chart,
+    json_cstr: *const std::os::raw::c_char,
+) -> bool {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+
+    let json_str = unsafe {
+        assert!(!json_cstr.is_null());
+        std::ffi::CStr::from_ptr(json_cstr)
+    };
+    let json_str = match json_str.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    // Price scale options are part of the chart options
+    let wrapper = format!("{{\"rightPriceScale\":{}}}", json_str);
+    if chart.state.options.apply_json(&wrapper) {
+        chart.state.update_price_scale();
+        chart
+            .state
+            .pending_mask
+            .set_global(crate::invalidation::InvalidationLevel::Full);
+        true
+    } else {
+        false
+    }
+}
+
+/// Get the width of the price scale in pixels.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_price_scale_width(chart: *const Chart) -> f32 {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &*chart
+    };
+    chart.state.layout.margins.right
+}
+
+// ----- ITimeScaleApi: applyOptions -----
+
+/// Apply options to the time scale via JSON.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_time_scale_apply_options(
+    chart: *mut Chart,
+    json_cstr: *const std::os::raw::c_char,
+) -> bool {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+
+    let json_str = unsafe {
+        assert!(!json_cstr.is_null());
+        std::ffi::CStr::from_ptr(json_cstr)
+    };
+    let json_str = match json_str.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    // Time scale options are part of the chart options
+    let wrapper = format!("{{\"timeScale\":{}}}", json_str);
+    if chart.state.options.apply_json(&wrapper) {
+        chart
+            .state
+            .pending_mask
+            .set_global(crate::invalidation::InvalidationLevel::Full);
+        true
+    } else {
+        false
+    }
+}
+
+// ----- Crosshair seriesData -----
+
+/// Get the values of all series at the current crosshair time.
+/// Fills out_series_ids and out_values with paired data.
+/// Returns the number of entries written.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_crosshair_get_series_data(
+    chart: *const Chart,
+    out_series_ids: *mut u32,
+    out_values: *mut f64,
+    max_count: u32,
+) -> u32 {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &*chart
+    };
+
+    let bar_index = match chart.state.crosshair.bar_index {
+        Some(i) => i,
+        None => return 0,
+    };
+
+    // Get the time from the primary data at this bar index
+    let crosshair_time = chart
+        .state
+        .data
+        .bars
+        .get(bar_index)
+        .map(|b| b.time)
+        .unwrap_or(0);
+    if crosshair_time == 0 {
+        return 0;
+    }
+
+    let mut count = 0u32;
+    for series in &chart.state.series.series {
+        if count >= max_count {
+            break;
+        }
+
+        // Binary search for the crosshair time in this series' data
+        let value = match &series.data {
+            crate::series::SeriesData::Ohlc(bars) => bars
+                .binary_search_by_key(&crosshair_time, |b| b.time)
+                .ok()
+                .map(|i| bars[i].close),
+            crate::series::SeriesData::Line(pts) => pts
+                .binary_search_by_key(&crosshair_time, |p| p.time)
+                .ok()
+                .map(|i| pts[i].value),
+            crate::series::SeriesData::Histogram(pts) => pts
+                .binary_search_by_key(&crosshair_time, |p| p.time)
+                .ok()
+                .map(|i| pts[i].value),
+        };
+
+        if let Some(val) = value {
+            unsafe {
+                *out_series_ids.add(count as usize) = series.id;
+                *out_values.add(count as usize) = val;
+            }
+            count += 1;
+        }
+    }
+
+    count
+}
+
+// ----- ITimeScaleApi: Event Subscriptions -----
+
+/// Subscribe to visible time range changes.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_time_scale_subscribe_visible_time_range_change(
+    chart: *mut Chart,
+    callback: RangeChangeCallback,
+    user_data: *mut c_void,
+) {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+    chart.visible_time_range_cb = Some((callback, user_data));
+}
+
+/// Unsubscribe from visible time range changes.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_time_scale_unsubscribe_visible_time_range_change(chart: *mut Chart) {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+    chart.visible_time_range_cb = None;
+}
+
+/// Subscribe to visible logical range changes.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_time_scale_subscribe_visible_logical_range_change(
+    chart: *mut Chart,
+    callback: RangeChangeCallback,
+    user_data: *mut c_void,
+) {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+    chart.visible_logical_range_cb = Some((callback, user_data));
+}
+
+/// Unsubscribe from visible logical range changes.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_time_scale_unsubscribe_visible_logical_range_change(chart: *mut Chart) {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+    chart.visible_logical_range_cb = None;
+}
+
+/// Subscribe to time scale size changes.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_time_scale_subscribe_size_change(
+    chart: *mut Chart,
+    callback: SizeChangeCallback,
+    user_data: *mut c_void,
+) {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+    chart.size_change_cb = Some((callback, user_data));
+}
+
+/// Unsubscribe from time scale size changes.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_time_scale_unsubscribe_size_change(chart: *mut Chart) {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+    chart.size_change_cb = None;
+}
+
+// ----- Fire event subscriptions (called internally after render) -----
+
+/// Check for range/size changes and fire subscribed callbacks.
+/// Should be called after each render.
+fn fire_change_events(chart: &mut Chart) {
+    let plot_width = chart.state.layout.plot_area.width;
+
+    // Check visible time range
+    if !chart.state.data.bars.is_empty() {
+        let (first, last) = chart.state.time_scale.visible_range(plot_width);
+        let start_time = chart
+            .state
+            .data
+            .bars
+            .get(first)
+            .map(|b| b.time)
+            .unwrap_or(0);
+        let end_time = chart
+            .state
+            .data
+            .bars
+            .get(last.saturating_sub(1))
+            .map(|b| b.time)
+            .unwrap_or(0);
+        let current = (start_time, end_time);
+        if chart.prev_visible_time_range != Some(current) {
+            chart.prev_visible_time_range = Some(current);
+            if let Some((cb, ud)) = chart.visible_time_range_cb {
+                cb(start_time as f64, end_time as f64, ud);
+            }
+        }
+    }
+
+    // Check visible logical range
+    let first_logical = chart.state.time_scale.first_visible_index(plot_width) as f32;
+    let last_logical = chart.state.time_scale.last_visible_index(plot_width) as f32;
+    let current_logical = (first_logical, last_logical);
+    if chart.prev_visible_logical_range != Some(current_logical) {
+        chart.prev_visible_logical_range = Some(current_logical);
+        if let Some((cb, ud)) = chart.visible_logical_range_cb {
+            cb(first_logical as f64, last_logical as f64, ud);
+        }
+    }
+
+    // Check chart size
+    let current_size = (chart.state.layout.width, chart.state.layout.height);
+    if chart.prev_chart_size != Some(current_size) {
+        chart.prev_chart_size = Some(current_size);
+        if let Some((cb, ud)) = chart.size_change_cb {
+            cb(current_size.0, current_size.1, ud);
+        }
+    }
 }
