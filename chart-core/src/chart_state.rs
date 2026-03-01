@@ -483,8 +483,8 @@ impl ChartState {
             if range <= 0.0 {
                 return;
             }
-            // Scale factor: dragging 100px = 2× zoom
-            let factor = 1.0 + (delta_y as f64 / 100.0);
+            // Scale factor: dragging 200px = 2× zoom
+            let factor = 1.0 + (delta_y as f64 / 200.0);
             let factor = factor.clamp(0.1, 10.0);
             let mid = (orig_min + orig_max) / 2.0;
             let new_half = range * factor / 2.0;
@@ -494,12 +494,11 @@ impl ChartState {
     }
 
     /// Handle time scale drag (zooming the X-axis like LWC).
-    /// delta_x > 0 = pointer moved right = expand (zoom in)
-    /// delta_x < 0 = pointer moved left = compress (zoom out)
+    /// Dragging left = expand (stretch chart), dragging right = compress
     fn drag_time_scale(&mut self, delta_x: f32) {
         if let Some(orig_spacing) = self.x_axis_drag_start_spacing {
-            // Scale: every 100px of drag doubles/halves spacing
-            let factor = 1.0 + (delta_x / 100.0);
+            // Negate: drag left (negative delta) = expand
+            let factor = 1.0 + (-delta_x / 200.0);
             let factor = factor.clamp(0.1, 10.0);
             let new_spacing = (orig_spacing * factor).clamp(2.0, 50.0);
             self.time_scale.bar_spacing = new_spacing;
@@ -791,7 +790,7 @@ mod tests {
         let spacing_before = state.time_scale.bar_spacing;
 
         state.pointer_down(ax, ay, 0);
-        state.pointer_move(ax + 50.0, ay); // Drag right = zoom in (expand)
+        state.pointer_move(ax - 50.0, ay); // Drag left = expand (stretch)
         assert!(
             state.time_scale.bar_spacing > spacing_before,
             "Should expand bar spacing: {} > {}",
@@ -799,7 +798,7 @@ mod tests {
             spacing_before
         );
 
-        state.pointer_up(ax + 50.0, ay, 0);
+        state.pointer_up(ax - 50.0, ay, 0);
     }
 
     #[test]
