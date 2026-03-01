@@ -272,4 +272,23 @@ mod native {
         };
         chart.state.fit_content()
     }
+
+    #[no_mangle]
+    pub extern "C" fn chart_key_down(chart: *mut Chart, key_code: u32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let key = crate::chart_state::ChartKey::from_code(key_code);
+        chart.state.key_down(key)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_tick(chart: *mut Chart) {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.tick();
+    }
 }

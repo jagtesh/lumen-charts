@@ -22,5 +22,7 @@ bool chart_scroll(Chart* chart, float delta_x, float delta_y);
 bool chart_zoom(Chart* chart, float factor, float center_x);
 bool chart_pinch(Chart* chart, float scale, float center_x, float center_y);
 bool chart_fit_content(Chart* chart);
+bool chart_key_down(Chart* chart, uint32_t key_code);
+void chart_tick(Chart* chart);
 
 #endif // CHART_CORE_H

@@ -73,15 +73,6 @@ class ChartView: NSView {
     override func mouseDown(with event: NSEvent) {
         guard let chart = chart else { return }
         let p = convert(event.locationInWindow, from: nil)
-
-        if event.clickCount == 2 {
-            // Double click → fit content
-            if chart_fit_content(chart) {
-                chart_render(chart)
-            }
-            return
-        }
-
         if chart_pointer_down(chart, Float(p.x), Float(p.y), 0) {
             chart_render(chart)
         }
@@ -152,6 +143,26 @@ class ChartView: NSView {
         if size.width > 0 && size.height > 0 {
             chart_resize(chart, UInt32(size.width), UInt32(size.height), scaleFactor)
             chart_render(chart)
+        }
+    }
+
+    // --- Keyboard ---
+    override func keyDown(with event: NSEvent) {
+        guard let chart = chart else { return }
+        let keyMap: [UInt16: UInt32] = [
+            123: 37,  // ArrowLeft
+            124: 39,  // ArrowRight
+            126: 38,  // ArrowUp
+            125: 40,  // ArrowDown
+            24: 187,  // + key
+            27: 189,  // - key
+            115: 36,  // Home
+            119: 35,  // End
+        ]
+        if let code = keyMap[event.keyCode] {
+            if chart_key_down(chart, code) {
+                chart_render(chart)
+            }
         }
     }
 

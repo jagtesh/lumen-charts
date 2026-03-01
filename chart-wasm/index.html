@@ -56,11 +56,13 @@
 
 <body>
     <div id="status">Loading WebGPU chart...</div>
-    <div id="chart-container">
+    <div id="chart-container" tabindex="0">
         <canvas id="chart-canvas"></canvas>
     </div>
     <div id="controls">
-        Scroll: pan &nbsp;|&nbsp; Ctrl+Scroll: zoom &nbsp;|&nbsp; Drag: pan &nbsp;|&nbsp; Double-click: fit all
+        Scroll: pan &nbsp;|&nbsp; Ctrl+Scroll: zoom &nbsp;|&nbsp; Drag: pan &nbsp;|&nbsp;
+        Drag Y-axis: zoom price &nbsp;|&nbsp; Double-click: fit all &nbsp;|&nbsp;
+        Arrow keys: navigate &nbsp;|&nbsp; Home: fit
     </div>
 
     <script type="module">
@@ -72,6 +74,8 @@
             chart_scroll,
             chart_zoom,
             chart_fit_content,
+            chart_key_down,
+            chart_tick,
         } from './pkg/chart_wasm.js';
 
         async function run() {
@@ -114,13 +118,8 @@
                 chart_pointer_move(p.x, p.y);
             });
 
-            // Pointer down → drag start
+            // Pointer down → drag start (dbl-click now handled in Rust via pointer_up)
             canvas.addEventListener('mousedown', (e) => {
-                if (e.detail === 2) {
-                    // Double click → fit content
-                    chart_fit_content();
-                    return;
-                }
                 const p = toChart(e);
                 chart_pointer_down(p.x, p.y);
             });
@@ -199,6 +198,32 @@
                 }
                 e.preventDefault();
             }, { passive: false });
+
+            // Keyboard navigation
+            const container = document.getElementById('chart-container');
+            container.addEventListener('keydown', (e) => {
+                const keyMap = {
+                    'ArrowLeft': 37, 'ArrowRight': 39,
+                    'ArrowUp': 38, 'ArrowDown': 40,
+                    '+': 187, '=': 187, '-': 189,
+                    'Home': 36, 'End': 35,
+                };
+                const code = keyMap[e.key];
+                if (code !== undefined) {
+                    e.preventDefault();
+                    chart_key_down(code);
+                }
+            });
+
+            // Focus the container for keyboard events
+            container.focus();
+
+            // Frame tick for dbl-click timing
+            function frameTick() {
+                chart_tick();
+                requestAnimationFrame(frameTick);
+            }
+            requestAnimationFrame(frameTick);
         }
 
         run();

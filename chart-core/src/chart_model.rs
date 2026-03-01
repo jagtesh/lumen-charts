@@ -76,4 +76,20 @@ impl ChartLayout {
             && y >= self.plot_area.y
             && y <= self.plot_area.y + self.plot_area.height
     }
+
+    /// Test if a point is in the Y-axis (price scale) area (right margin)
+    pub fn y_axis_contains(&self, x: f32, y: f32) -> bool {
+        x > self.plot_area.x + self.plot_area.width
+            && x <= self.width
+            && y >= self.plot_area.y
+            && y <= self.plot_area.y + self.plot_area.height
+    }
+
+    /// Test if a point is in the X-axis (time scale) area (bottom margin)
+    pub fn x_axis_contains(&self, x: f32, y: f32) -> bool {
+        x >= self.plot_area.x
+            && x <= self.plot_area.x + self.plot_area.width
+            && y > self.plot_area.y + self.plot_area.height
+            && y <= self.height
+    }
 }

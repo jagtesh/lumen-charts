@@ -215,3 +215,20 @@ pub fn chart_zoom(factor: f32, center_x: f32) {
 pub fn chart_fit_content() {
     with_chart(|chart| chart.state.fit_content());
 }
+
+#[wasm_bindgen]
+pub fn chart_key_down(key_code: u32) {
+    with_chart(|chart| {
+        let key = chart_core::chart_state::ChartKey::from_code(key_code);
+        chart.state.key_down(key)
+    });
+}
+
+#[wasm_bindgen]
+pub fn chart_tick() {
+    CHART.with(|c| {
+        if let Some(chart) = c.borrow_mut().as_mut() {
+            chart.state.tick();
+        }
+    });
+}
