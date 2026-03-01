@@ -11,9 +11,15 @@ use skrifa::MetadataProvider;
 /// Embedded Roboto Mono font data (variable weight, Apache 2.0 license)
 static FONT_DATA: &[u8] = include_bytes!("../fonts/RobotoMono.ttf");
 
-/// Get the embedded chart font
+/// Get the embedded chart font (for passing to Vello draw_glyphs)
 pub fn chart_font() -> Font {
     Font::new(Blob::new(Arc::new(FONT_DATA.to_vec())), 0)
+}
+
+/// Get a skrifa FontRef for glyph metrics (uses the raw embedded bytes directly)
+fn font_ref() -> skrifa::FontRef<'static> {
+    // Use the raw static bytes — avoids Blob/Arc indirection issues
+    skrifa::FontRef::from_index(FONT_DATA, 0).expect("Embedded font should be valid")
 }
 
 /// Draw a text string at the given position using Vello's GPU glyph rendering.
@@ -33,14 +39,9 @@ pub fn draw_text(
         return;
     }
 
-    // Use skrifa to resolve character -> glyph ID and compute advances
-    let font_ref = match skrifa::FontRef::from_index(font.data.as_ref(), font.index) {
-        Ok(f) => f,
-        Err(_) => return,
-    };
-
-    let charmap = font_ref.charmap();
-    let glyph_metrics = font_ref.glyph_metrics(Size::new(font_size), LocationRef::default());
+    let fref = font_ref();
+    let charmap = fref.charmap();
+    let glyph_metrics = fref.glyph_metrics(Size::new(font_size), LocationRef::default());
 
     let mut glyphs = Vec::with_capacity(text.len());
     let mut cursor_x = x as f32;
@@ -54,7 +55,6 @@ pub fn draw_text(
             y: y as f32,
         });
 
-        // Advance the cursor
         let advance = glyph_metrics
             .advance_width(glyph_id)
             .unwrap_or(font_size * 0.6);
@@ -75,13 +75,9 @@ pub fn measure_text(font: &Font, text: &str, font_size: f32) -> f32 {
         return 0.0;
     }
 
-    let font_ref = match skrifa::FontRef::from_index(font.data.as_ref(), font.index) {
-        Ok(f) => f,
-        Err(_) => return text.len() as f32 * font_size * 0.6,
-    };
-
-    let charmap = font_ref.charmap();
-    let glyph_metrics = font_ref.glyph_metrics(Size::new(font_size), LocationRef::default());
+    let fref = font_ref();
+    let charmap = fref.charmap();
+    let glyph_metrics = fref.glyph_metrics(Size::new(font_size), LocationRef::default());
 
     let mut width = 0.0f32;
     for ch in text.chars() {
@@ -92,4 +88,64 @@ pub fn measure_text(font: &Font, text: &str, font_size: f32) -> f32 {
         width += advance;
     }
     width
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_font_loads() {
+        let font = chart_font();
+        assert!(!font.data.is_empty());
+    }
+
+    #[test]
+    fn test_font_ref_parses() {
+        let fref = font_ref();
+        let charmap = fref.charmap();
+        let glyph = charmap.map('A' as u32);
+        assert!(glyph.is_some(), "Should find glyph for 'A'");
+    }
+
+    #[test]
+    fn test_glyph_resolution() {
+        let fref = font_ref();
+        let charmap = fref.charmap();
+
+        for ch in "0123456789.,-:ABCabc".chars() {
+            let glyph = charmap.map(ch as u32);
+            assert!(glyph.is_some(), "Glyph not found for char '{}'", ch);
+            assert!(glyph.unwrap().to_u32() > 0, "Glyph ID 0 for char '{}'", ch);
+        }
+    }
+
+    #[test]
+    fn test_measure_text_positive() {
+        let font = chart_font();
+        let width = measure_text(&font, "123.45", 11.0);
+        assert!(width > 0.0, "Text width should be positive, got {}", width);
+        assert!(width > 30.0, "Text width seems too small: {}", width);
+        assert!(width < 200.0, "Text width seems too large: {}", width);
+    }
+
+    #[test]
+    fn test_advance_widths() {
+        let fref = font_ref();
+        let charmap = fref.charmap();
+        let glyph_metrics = fref.glyph_metrics(Size::new(11.0), LocationRef::default());
+
+        for ch in "0123456789".chars() {
+            let glyph_id = charmap.map(ch as u32).unwrap();
+            let advance = glyph_metrics.advance_width(glyph_id);
+            assert!(advance.is_some(), "No advance width for char '{}'", ch);
+            let advance = advance.unwrap();
+            assert!(
+                advance > 0.0 && advance < 50.0,
+                "Bad advance {} for '{}'",
+                advance,
+                ch
+            );
+        }
+    }
 }
