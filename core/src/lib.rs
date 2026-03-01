@@ -152,23 +152,8 @@ mod native {
         Box::into_raw(Box::new(chart))
     }
 
-    #[no_mangle]
-    pub extern "C" fn chart_render(chart: *mut Chart) {
-        let chart = unsafe {
-            assert!(!chart.is_null());
-            &mut *chart
-        };
-
-        // Consume the pending invalidation mask
-        let mask = chart.state.consume_mask();
-        let level = mask.global_level();
-
-        if !mask.needs_redraw() {
-            // Nothing changed since last render — skip entirely
-            chart.state.skipped_render_count += 1;
-            return;
-        }
-
+    /// Internal render implementation shared by both explicit and conditional paths.
+    fn render_internal(chart: &mut Chart, level: crate::invalidation::InvalidationLevel) {
         chart.scene.reset();
 
         if level.needs_bottom_scene() {
@@ -221,6 +206,47 @@ mod native {
             .expect("Vello render failed");
 
         surface_texture.present();
+    }
+
+    /// Render the chart unconditionally. Call this after explicit state mutations
+    /// to ensure the display is updated immediately.
+    #[no_mangle]
+    pub extern "C" fn chart_render(chart: *mut Chart) {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+
+        // Consume any pending mask, but always render regardless
+        let mask = chart.state.consume_mask();
+        let level = mask.global_level();
+        // Use Full if nothing was pending — ensures a complete render
+        let effective_level = if level == crate::invalidation::InvalidationLevel::None {
+            crate::invalidation::InvalidationLevel::Full
+        } else {
+            level
+        };
+
+        render_internal(chart, effective_level);
+    }
+
+    /// Render the chart only if the invalidation mask indicates a redraw is needed.
+    /// Use this in event loops / display links to avoid unnecessary GPU work.
+    #[no_mangle]
+    pub extern "C" fn chart_render_if_needed(chart: *mut Chart) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+
+        let mask = chart.state.consume_mask();
+        if !mask.needs_redraw() {
+            chart.state.skipped_render_count += 1;
+            return false;
+        }
+
+        render_internal(chart, mask.global_level());
+        true
     }
 
     #[no_mangle]

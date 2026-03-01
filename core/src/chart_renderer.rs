@@ -77,6 +77,23 @@ pub fn render_bottom_scene(scene: &mut Scene, state: &ChartState) {
         }
     }
 
+    // Draw opaque backgrounds for additional panes (so main chart doesn't bleed through)
+    for pane in &state.panes[1..] {
+        let r = &pane.layout_rect;
+        scene.fill(
+            vello::peniko::Fill::NonZero,
+            t,
+            BG_COLOR,
+            None,
+            &KurboRect::new(
+                r.x as f64,
+                r.y as f64,
+                (r.x + r.width) as f64,
+                (r.y + r.height) as f64,
+            ),
+        );
+    }
+
     // Draw additional series from the collection
     for series in &state.series.series {
         if !series.visible {
