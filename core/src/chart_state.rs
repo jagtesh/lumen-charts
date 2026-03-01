@@ -490,6 +490,7 @@ impl ChartState {
             if let Some(series) = self.series.get_mut(series_id) {
                 series.pane_index = pane_idx;
                 self.update_price_scale();
+                self.pending_mask.set_global(InvalidationLevel::Full);
                 return true;
             }
         }
@@ -512,6 +513,7 @@ impl ChartState {
             }
             self.update_panes_layout();
             self.update_price_scale();
+            self.pending_mask.set_global(InvalidationLevel::Full);
             true
         } else {
             false
@@ -1064,8 +1066,35 @@ impl ChartState {
         if bar.is_some() {
             self.time_scale = TimeScale::new(self.data.bars.len(), self.layout.plot_area.width);
             self.update_price_scale();
+            self.pending_mask.set_global(InvalidationLevel::Light);
         }
         bar
+    }
+
+    // --- Series management (with invalidation) ---
+
+    /// Add a series to the chart. Returns the series ID.
+    pub fn add_series(&mut self, series: crate::series::Series) -> u32 {
+        let id = self.series.add(series);
+        self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Full);
+        id
+    }
+
+    /// Remove a series by ID. Returns true if found and removed.
+    pub fn remove_series(&mut self, series_id: u32) -> bool {
+        let removed = self.series.remove(series_id);
+        if removed {
+            self.update_price_scale();
+            self.pending_mask.set_global(InvalidationLevel::Full);
+        }
+        removed
+    }
+
+    /// Mark that series data was mutated (called after updating series data directly).
+    pub fn series_data_changed(&mut self) {
+        self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Light);
     }
 
     /// Get the number of bars.

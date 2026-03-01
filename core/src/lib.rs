@@ -660,6 +660,7 @@ mod native {
                 low,
                 close,
             });
+            chart.state.series_data_changed();
             return true;
         }
         false
@@ -681,6 +682,7 @@ mod native {
             series
                 .data
                 .update_line(crate::series::LineDataPoint { time, value });
+            chart.state.series_data_changed();
             return true;
         }
         false
@@ -715,6 +717,7 @@ mod native {
             series
                 .data
                 .update_histogram(crate::series::HistogramDataPoint { time, value, color });
+            chart.state.series_data_changed();
             return true;
         }
         false
@@ -729,6 +732,7 @@ mod native {
         };
         if let Some(series) = chart.state.series.get_mut(series_id) {
             series.data.pop(count as usize);
+            chart.state.series_data_changed();
             return true;
         }
         false
@@ -760,6 +764,10 @@ mod native {
             5 => crate::series::SeriesType::Baseline,
             _ => return false,
         };
+        chart
+            .state
+            .pending_mask
+            .set_global(crate::invalidation::InvalidationLevel::Full);
         true
     }
 
@@ -780,6 +788,10 @@ mod native {
 
         if chart.state.options.apply_json(&json_str) {
             chart.state.update_price_scale();
+            chart
+                .state
+                .pending_mask
+                .set_global(crate::invalidation::InvalidationLevel::Full);
             return true;
         }
         false
@@ -802,7 +814,14 @@ mod native {
         let json_str = unsafe { std::ffi::CStr::from_ptr(json_cstr) }.to_string_lossy();
 
         if let Some(series) = chart.state.series.get_mut(series_id) {
-            return series.apply_options_json(&json_str);
+            let result = series.apply_options_json(&json_str);
+            if result {
+                chart
+                    .state
+                    .pending_mask
+                    .set_global(crate::invalidation::InvalidationLevel::Full);
+            }
+            return result;
         }
         false
     }
@@ -831,7 +850,12 @@ mod native {
                     }
                 }
             }
-            return series.add_price_line(opts);
+            let id = series.add_price_line(opts);
+            chart
+                .state
+                .pending_mask
+                .set_global(crate::invalidation::InvalidationLevel::Light);
+            return id;
         }
         u32::MAX
     }
@@ -847,7 +871,14 @@ mod native {
             &mut *chart
         };
         if let Some(series) = chart.state.series.get_mut(series_id) {
-            return series.remove_price_line(line_id);
+            let removed = series.remove_price_line(line_id);
+            if removed {
+                chart
+                    .state
+                    .pending_mask
+                    .set_global(crate::invalidation::InvalidationLevel::Light);
+            }
+            return removed;
         }
         false
     }
@@ -1287,7 +1318,7 @@ mod native {
             .collect();
 
         let series = crate::series::Series::line(0, points);
-        chart.state.series.add(series)
+        chart.state.add_series(series)
     }
 
     /// Add a new OHLC series to the chart.
@@ -1323,7 +1354,7 @@ mod native {
         }
 
         let series = crate::series::Series::ohlc(0, bars);
-        chart.state.series.add(series)
+        chart.state.add_series(series)
     }
 
     /// Add a new Candlestick series to the chart.
@@ -1359,7 +1390,7 @@ mod native {
         }
 
         let series = crate::series::Series::candlestick(0, bars);
-        chart.state.series.add(series)
+        chart.state.add_series(series)
     }
 
     /// Add a new area series to the chart.
@@ -1384,7 +1415,7 @@ mod native {
             .collect();
 
         let series = crate::series::Series::area(0, points);
-        chart.state.series.add(series)
+        chart.state.add_series(series)
     }
 
     /// Add a new baseline series to the chart.
@@ -1410,7 +1441,7 @@ mod native {
             .collect();
 
         let series = crate::series::Series::baseline(0, points, base_value);
-        chart.state.series.add(series)
+        chart.state.add_series(series)
     }
 
     /// Add a new histogram series to the chart.
@@ -1453,7 +1484,7 @@ mod native {
         }
 
         let series = crate::series::Series::histogram(0, points);
-        chart.state.series.add(series)
+        chart.state.add_series(series)
     }
 
     /// Remove a series by its ID. Returns true if the series was found and removed.
@@ -1463,7 +1494,7 @@ mod native {
             assert!(!chart.is_null());
             &mut *chart
         };
-        chart.state.series.remove(series_id)
+        chart.state.remove_series(series_id)
     }
 
     /// Get the number of additional series on the chart.
