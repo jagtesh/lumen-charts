@@ -1,11 +1,73 @@
 use wasm_bindgen::prelude::*;
 use vello::wgpu;
 use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use chart_core::chart_model::ChartData;
 use chart_core::chart_renderer::render_chart;
 use chart_core::chart_state::ChartState;
 use chart_core::sample_data::sample_data;
+
+/// Persistent chart context for the WASM module
+struct WasmChart {
+    state: ChartState,
+    scene: Scene,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    surface: wgpu::Surface<'static>,
+    surface_config: wgpu::SurfaceConfiguration,
+    vello_renderer: VelloRenderer,
+}
+
+impl WasmChart {
+    fn render(&mut self) {
+        self.scene.reset();
+        render_chart(&mut self.scene, &self.state);
+
+        let surface_texture = match self.surface.get_current_texture() {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!("Failed to get surface texture: {}", e);
+                return;
+            }
+        };
+
+        let render_params = vello::RenderParams {
+            base_color: vello::peniko::Color::BLACK,
+            width: self.surface_config.width,
+            height: self.surface_config.height,
+            antialiasing_method: AaConfig::Area,
+        };
+
+        self.vello_renderer
+            .render_to_surface(
+                &self.device,
+                &self.queue,
+                &self.scene,
+                &surface_texture,
+                &render_params,
+            )
+            .expect("Vello render failed");
+
+        surface_texture.present();
+    }
+}
+
+// Thread-local persistent chart instance
+thread_local! {
+    static CHART: RefCell<Option<WasmChart>> = RefCell::new(None);
+}
+
+fn with_chart<F: FnOnce(&mut WasmChart) -> bool>(f: F) {
+    CHART.with(|c| {
+        if let Some(chart) = c.borrow_mut().as_mut() {
+            if f(chart) {
+                chart.render();
+            }
+        }
+    });
+}
 
 #[wasm_bindgen(start)]
 pub async fn main() {
@@ -14,7 +76,6 @@ pub async fn main() {
 
     log::info!("Chart WASM starting...");
 
-    // Get the canvas element
     let window = web_sys::window().unwrap();
     let document = window.document().unwrap();
     let canvas = document
@@ -32,18 +93,15 @@ pub async fn main() {
     canvas.set_width(physical_width);
     canvas.set_height(physical_height);
 
-    // Create wgpu instance (WebGPU backend in browser)
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::BROWSER_WEBGPU,
         ..Default::default()
     });
 
-    // Create surface from canvas
     let surface = instance
         .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
         .expect("Failed to create surface from canvas");
 
-    // Get adapter + device
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             compatible_surface: Some(&surface),
@@ -64,7 +122,6 @@ pub async fn main() {
         .await
         .expect("Failed to create device");
 
-    // Configure surface
     let surface_caps = surface.get_capabilities(&adapter);
     let format = surface_caps
         .formats
@@ -85,8 +142,7 @@ pub async fn main() {
     };
     surface.configure(&device, &surface_config);
 
-    // Create Vello renderer
-    let mut vello_renderer = VelloRenderer::new(
+    let vello_renderer = VelloRenderer::new(
         &device,
         RendererOptions {
             surface_format: Some(format),
@@ -97,32 +153,65 @@ pub async fn main() {
     )
     .expect("Failed to create Vello renderer");
 
-    // Build chart state and render
     let data = ChartData {
         bars: sample_data(),
     };
     let state = ChartState::new(data, width as f32, height as f32, scale_factor);
 
-    let mut scene = Scene::new();
-    render_chart(&mut scene, &state);
-
-    // Render
-    let surface_texture = surface
-        .get_current_texture()
-        .expect("Failed to get surface texture");
-
-    let render_params = vello::RenderParams {
-        base_color: vello::peniko::Color::BLACK,
-        width: physical_width,
-        height: physical_height,
-        antialiasing_method: AaConfig::Area,
+    let mut chart = WasmChart {
+        state,
+        scene: Scene::new(),
+        device,
+        queue,
+        surface,
+        surface_config,
+        vello_renderer,
     };
 
-    vello_renderer
-        .render_to_surface(&device, &queue, &scene, &surface_texture, &render_params)
-        .expect("Vello render failed");
+    // Initial render
+    chart.render();
 
-    surface_texture.present();
+    // Store persistently
+    CHART.with(|c| {
+        *c.borrow_mut() = Some(chart);
+    });
 
-    log::info!("Chart rendered successfully!");
+    log::info!("Chart rendered and interactive!");
+}
+
+// --- Exported interaction functions ---
+
+#[wasm_bindgen]
+pub fn chart_pointer_move(x: f32, y: f32) {
+    with_chart(|chart| chart.state.pointer_move(x, y));
+}
+
+#[wasm_bindgen]
+pub fn chart_pointer_down(x: f32, y: f32) {
+    with_chart(|chart| chart.state.pointer_down(x, y, 0));
+}
+
+#[wasm_bindgen]
+pub fn chart_pointer_up(x: f32, y: f32) {
+    with_chart(|chart| chart.state.pointer_up(x, y, 0));
+}
+
+#[wasm_bindgen]
+pub fn chart_pointer_leave() {
+    with_chart(|chart| chart.state.pointer_leave());
+}
+
+#[wasm_bindgen]
+pub fn chart_scroll(delta_x: f32, delta_y: f32) {
+    with_chart(|chart| chart.state.scroll(delta_x, delta_y));
+}
+
+#[wasm_bindgen]
+pub fn chart_zoom(factor: f32, center_x: f32) {
+    with_chart(|chart| chart.state.zoom(factor, center_x));
+}
+
+#[wasm_bindgen]
+pub fn chart_fit_content() {
+    with_chart(|chart| chart.state.fit_content());
 }

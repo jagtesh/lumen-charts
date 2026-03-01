@@ -1,11 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Chart MVP — WASM + WebGPU</title>
+    <title>Chart MVP — WASM + WebGPU (Interactive)</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             background: #0a0a0d;
             display: flex;
@@ -14,6 +20,7 @@
             min-height: 100vh;
             font-family: system-ui, -apple-system, sans-serif;
         }
+
         #chart-container {
             width: 900px;
             height: 600px;
@@ -21,11 +28,14 @@
             border-radius: 8px;
             overflow: hidden;
         }
+
         canvas {
             width: 100%;
             height: 100%;
             display: block;
+            cursor: crosshair;
         }
+
         #status {
             position: fixed;
             top: 16px;
@@ -33,21 +43,40 @@
             color: #666;
             font-size: 13px;
         }
+
+        #controls {
+            position: fixed;
+            bottom: 16px;
+            left: 16px;
+            color: #555;
+            font-size: 12px;
+        }
     </style>
 </head>
+
 <body>
     <div id="status">Loading WebGPU chart...</div>
     <div id="chart-container">
         <canvas id="chart-canvas"></canvas>
     </div>
+    <div id="controls">
+        Scroll: pan &nbsp;|&nbsp; Ctrl+Scroll: zoom &nbsp;|&nbsp; Drag: pan &nbsp;|&nbsp; Double-click: fit all
+    </div>
 
     <script type="module">
-        import init from './pkg/chart_wasm.js';
+        import init, {
+            chart_pointer_move,
+            chart_pointer_down,
+            chart_pointer_up,
+            chart_pointer_leave,
+            chart_scroll,
+            chart_zoom,
+            chart_fit_content,
+        } from './pkg/chart_wasm.js';
 
         async function run() {
             const status = document.getElementById('status');
 
-            // Check WebGPU support
             if (!navigator.gpu) {
                 status.textContent = '❌ WebGPU not supported in this browser.';
                 status.style.color = '#ef5350';
@@ -57,16 +86,123 @@
             try {
                 status.textContent = '⏳ Loading WASM module...';
                 await init();
-                status.textContent = '✅ Chart rendered via WebGPU!';
+                status.textContent = '✅ Chart rendered — interactive!';
                 status.style.color = '#26a69a';
             } catch (e) {
                 console.error('Failed to initialize:', e);
                 status.textContent = `❌ Error: ${e.message}`;
                 status.style.color = '#ef5350';
+                return;
             }
+
+            // --- Wire up interactions ---
+            const canvas = document.getElementById('chart-canvas');
+            const rect = () => canvas.getBoundingClientRect();
+
+            // Convert page coords to chart logical coords
+            function toChart(e) {
+                const r = rect();
+                return {
+                    x: e.clientX - r.left,
+                    y: e.clientY - r.top,
+                };
+            }
+
+            // Pointer move → crosshair
+            canvas.addEventListener('mousemove', (e) => {
+                const p = toChart(e);
+                chart_pointer_move(p.x, p.y);
+            });
+
+            // Pointer down → drag start
+            canvas.addEventListener('mousedown', (e) => {
+                if (e.detail === 2) {
+                    // Double click → fit content
+                    chart_fit_content();
+                    return;
+                }
+                const p = toChart(e);
+                chart_pointer_down(p.x, p.y);
+            });
+
+            // Pointer up → drag end
+            canvas.addEventListener('mouseup', (e) => {
+                const p = toChart(e);
+                chart_pointer_up(p.x, p.y);
+            });
+
+            // Pointer leave → hide crosshair
+            canvas.addEventListener('mouseleave', () => {
+                chart_pointer_leave();
+            });
+
+            // Wheel → pan or zoom
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const p = toChart(e);
+
+                if (e.ctrlKey || e.metaKey) {
+                    // Ctrl/Cmd + scroll = zoom
+                    const factor = 1.0 - e.deltaY * 0.005;
+                    chart_zoom(factor, p.x);
+                } else {
+                    // Regular scroll = pan
+                    chart_scroll(-e.deltaX, e.deltaY);
+                }
+            }, { passive: false });
+
+            // Touch support for pinch zoom
+            let lastTouchDistance = 0;
+            let lastTouchCenter = { x: 0, y: 0 };
+
+            canvas.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    const p = toChart(e.touches[0]);
+                    chart_pointer_down(p.x, p.y);
+                } else if (e.touches.length === 2) {
+                    const dx = e.touches[1].clientX - e.touches[0].clientX;
+                    const dy = e.touches[1].clientY - e.touches[0].clientY;
+                    lastTouchDistance = Math.sqrt(dx * dx + dy * dy);
+                    lastTouchCenter = toChart({
+                        clientX: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                        clientY: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+                    });
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            canvas.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 1) {
+                    const p = toChart(e.touches[0]);
+                    chart_pointer_move(p.x, p.y);
+                } else if (e.touches.length === 2) {
+                    const dx = e.touches[1].clientX - e.touches[0].clientX;
+                    const dy = e.touches[1].clientY - e.touches[0].clientY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (lastTouchDistance > 0) {
+                        const factor = dist / lastTouchDistance;
+                        const center = toChart({
+                            clientX: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                            clientY: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+                        });
+                        chart_zoom(factor, center.x);
+                    }
+                    lastTouchDistance = dist;
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', (e) => {
+                if (e.touches.length === 0) {
+                    chart_pointer_up(0, 0);
+                    lastTouchDistance = 0;
+                }
+                e.preventDefault();
+            }, { passive: false });
         }
 
         run();
     </script>
 </body>
+
 </html>
