@@ -44,7 +44,14 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
     match state.active_series_type {
         SeriesType::Ohlc => draw_ohlc_bars(scene, state, t),
         SeriesType::Candlestick => draw_candlestick_bars(scene, state, t),
-        SeriesType::Line => draw_line_series_from_ohlc(scene, state, t),
+        SeriesType::Line | SeriesType::Area | SeriesType::Baseline => {
+            draw_line_series_from_ohlc(scene, state, t);
+            // Area/Baseline get additional fill rendering (TODO: gradient fill)
+        }
+        SeriesType::Histogram => {
+            // Histogram from OHLC shows as line for now
+            draw_line_series_from_ohlc(scene, state, t);
+        }
     }
 
     // Draw additional series from the collection
@@ -53,11 +60,16 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
             continue;
         }
         match (&series.series_type, &series.data) {
-            (SeriesType::Line, SeriesData::Line(pts)) => {
+            (SeriesType::Line, SeriesData::Line(pts))
+            | (SeriesType::Area, SeriesData::Line(pts))
+            | (SeriesType::Baseline, SeriesData::Line(pts)) => {
                 draw_line_series(scene, state, pts, &series.line_options, t);
             }
             (SeriesType::Candlestick, SeriesData::Ohlc(bars)) => {
                 draw_candlestick_bars_data(scene, state, bars, &series.candlestick_options, t);
+            }
+            (SeriesType::Histogram, SeriesData::Histogram(pts)) => {
+                draw_histogram_series(scene, state, pts, &series.histogram_options, t);
             }
             _ => {} // Other combos use default OHLC
         }
@@ -796,5 +808,43 @@ fn draw_line_series(
                 vello::kurbo::Circle::new((x as f64, y as f64), opts.point_markers_radius as f64);
             scene.fill(vello::peniko::Fill::NonZero, t, color, None, &circle);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Histogram series renderer
+// ---------------------------------------------------------------------------
+
+/// Draw a histogram series — vertical bars from base to value
+fn draw_histogram_series(
+    scene: &mut Scene,
+    state: &ChartState,
+    points: &[crate::series::HistogramDataPoint],
+    opts: &crate::series::HistogramSeriesOptions,
+    t: Affine,
+) {
+    let plot_area = &state.layout.plot_area;
+    let default_color = Color::new(opts.color);
+    let bar_width = (state.time_scale.bar_spacing * 0.7).max(1.0);
+    let base_y = state.price_scale.price_to_y(opts.base, plot_area);
+
+    for (i, pt) in points.iter().enumerate() {
+        let x = state.time_scale.index_to_x(i, plot_area);
+        let y = state.price_scale.price_to_y(pt.value, plot_area);
+
+        let color = pt.color.map_or(default_color, |c| Color::new(c));
+
+        let left = x - bar_width / 2.0;
+        let top = y.min(base_y);
+        let bottom = y.max(base_y);
+        let height = (bottom - top).max(1.0);
+
+        let rect = KurboRect::new(
+            left as f64,
+            top as f64,
+            (left + bar_width) as f64,
+            (top + height) as f64,
+        );
+        scene.fill(vello::peniko::Fill::NonZero, t, color, None, &rect);
     }
 }

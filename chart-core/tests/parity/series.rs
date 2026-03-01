@@ -46,23 +46,24 @@ fn lwc_series_data_creator_candlestick() {
 
 /// LWC: getSeriesDataCreator — Area
 #[test]
-#[ignore] // Slice 6
 fn lwc_series_data_creator_area() {
-    todo!("Implement Area series type");
+    let series = Series::area(0, vec![]);
+    assert_eq!(series.series_type, SeriesType::Area);
 }
 
 /// LWC: getSeriesDataCreator — Baseline
 #[test]
-#[ignore] // Slice 6
 fn lwc_series_data_creator_baseline() {
-    todo!("Implement Baseline series type");
+    let series = Series::baseline(0, vec![], 100.0);
+    assert_eq!(series.series_type, SeriesType::Baseline);
+    assert_eq!(series.baseline_options.base_value, 100.0);
 }
 
 /// LWC: getSeriesDataCreator — Histogram
 #[test]
-#[ignore] // Slice 6
 fn lwc_series_data_creator_histogram() {
-    todo!("Implement Histogram series type");
+    let series = Series::histogram(0, vec![]);
+    assert_eq!(series.series_type, SeriesType::Histogram);
 }
 
 /// LWC: getSeriesPlotRowCreator — OHLC min/max

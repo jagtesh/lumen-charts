@@ -13,6 +13,12 @@ pub enum SeriesType {
     Candlestick,
     /// Line series (connects close prices)
     Line,
+    /// Area series (line + gradient fill below)
+    Area,
+    /// Histogram series (vertical bars from baseline)
+    Histogram,
+    /// Baseline series (line with top/bottom areas split at a baseline value)
+    Baseline,
 }
 
 impl Default for SeriesType {
@@ -84,15 +90,93 @@ impl Default for LineSeriesOptions {
     }
 }
 
+/// Options specific to area series (LWC: AreaSeriesOptions)
+#[derive(Debug, Clone)]
+pub struct AreaSeriesOptions {
+    /// Line color at the top
+    pub line_color: [f32; 4],
+    pub line_width: f32,
+    /// Gradient top color (at the line)
+    pub top_color: [f32; 4],
+    /// Gradient bottom color (at the chart bottom)
+    pub bottom_color: [f32; 4],
+}
+
+impl Default for AreaSeriesOptions {
+    fn default() -> Self {
+        AreaSeriesOptions {
+            line_color: [0.26, 0.52, 0.96, 1.0],
+            line_width: 2.0,
+            top_color: [0.26, 0.52, 0.96, 0.4],
+            bottom_color: [0.26, 0.52, 0.96, 0.0],
+        }
+    }
+}
+
+/// Options specific to histogram series (LWC: HistogramSeriesOptions)
+#[derive(Debug, Clone)]
+pub struct HistogramSeriesOptions {
+    /// Default bar color
+    pub color: [f32; 4],
+    /// Base value (usually 0.0) — bars extend from base to value
+    pub base: f64,
+}
+
+impl Default for HistogramSeriesOptions {
+    fn default() -> Self {
+        HistogramSeriesOptions {
+            color: [0.26, 0.52, 0.96, 0.7],
+            base: 0.0,
+        }
+    }
+}
+
+/// A single histogram data point with optional per-bar color
+#[derive(Debug, Clone, Copy)]
+pub struct HistogramDataPoint {
+    pub time: i64,
+    pub value: f64,
+    /// Per-bar color override (if None, uses series default)
+    pub color: Option<[f32; 4]>,
+}
+
+/// Options specific to baseline series (LWC: BaselineSeriesOptions)
+#[derive(Debug, Clone)]
+pub struct BaselineSeriesOptions {
+    /// The baseline value that splits top/bottom areas
+    pub base_value: f64,
+    /// Color and fill for the region above the baseline
+    pub top_line_color: [f32; 4],
+    pub top_fill_color: [f32; 4],
+    /// Color and fill for the region below the baseline
+    pub bottom_line_color: [f32; 4],
+    pub bottom_fill_color: [f32; 4],
+    pub line_width: f32,
+}
+
+impl Default for BaselineSeriesOptions {
+    fn default() -> Self {
+        BaselineSeriesOptions {
+            base_value: 0.0,
+            top_line_color: [0.15, 0.65, 0.60, 1.0],
+            top_fill_color: [0.15, 0.65, 0.60, 0.2],
+            bottom_line_color: [0.94, 0.33, 0.31, 1.0],
+            bottom_fill_color: [0.94, 0.33, 0.31, 0.2],
+            line_width: 2.0,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Series data — typed union of data kinds
 // ---------------------------------------------------------------------------
 
-/// Series data can be OHLC bars or line points
+/// Series data can be OHLC bars, line points, or histogram points
 #[derive(Debug, Clone)]
 pub enum SeriesData {
     Ohlc(Vec<OhlcBar>),
     Line(Vec<LineDataPoint>),
+    Histogram(Vec<HistogramDataPoint>),
 }
 
 impl SeriesData {
@@ -100,6 +184,7 @@ impl SeriesData {
         match self {
             SeriesData::Ohlc(bars) => bars.len(),
             SeriesData::Line(pts) => pts.len(),
+            SeriesData::Histogram(pts) => pts.len(),
         }
     }
 
@@ -112,6 +197,7 @@ impl SeriesData {
         match self {
             SeriesData::Ohlc(bars) => bars.get(index).map(|b| b.close),
             SeriesData::Line(pts) => pts.get(index).map(|p| p.value),
+            SeriesData::Histogram(pts) => pts.get(index).map(|p| p.value),
         }
     }
 
@@ -120,6 +206,7 @@ impl SeriesData {
         match self {
             SeriesData::Ohlc(bars) => bars.get(index).map(|b| b.time),
             SeriesData::Line(pts) => pts.get(index).map(|p| p.time),
+            SeriesData::Histogram(pts) => pts.get(index).map(|p| p.time),
         }
     }
 
@@ -148,6 +235,17 @@ impl SeriesData {
                     .fold(f64::NEG_INFINITY, f64::max);
                 Some((min, max))
             }
+            SeriesData::Histogram(pts) => {
+                if pts.is_empty() {
+                    return None;
+                }
+                let min = pts.iter().map(|p| p.value).fold(f64::INFINITY, f64::min);
+                let max = pts
+                    .iter()
+                    .map(|p| p.value)
+                    .fold(f64::NEG_INFINITY, f64::max);
+                Some((min, max))
+            }
         }
     }
 }
@@ -164,6 +262,9 @@ pub struct Series {
     pub data: SeriesData,
     pub candlestick_options: CandlestickOptions,
     pub line_options: LineSeriesOptions,
+    pub area_options: AreaSeriesOptions,
+    pub histogram_options: HistogramSeriesOptions,
+    pub baseline_options: BaselineSeriesOptions,
     pub visible: bool,
 }
 
@@ -176,6 +277,9 @@ impl Series {
             data: SeriesData::Ohlc(bars),
             candlestick_options: CandlestickOptions::default(),
             line_options: LineSeriesOptions::default(),
+            area_options: AreaSeriesOptions::default(),
+            histogram_options: HistogramSeriesOptions::default(),
+            baseline_options: BaselineSeriesOptions::default(),
             visible: true,
         }
     }
@@ -188,6 +292,9 @@ impl Series {
             data: SeriesData::Ohlc(bars),
             candlestick_options: CandlestickOptions::default(),
             line_options: LineSeriesOptions::default(),
+            area_options: AreaSeriesOptions::default(),
+            histogram_options: HistogramSeriesOptions::default(),
+            baseline_options: BaselineSeriesOptions::default(),
             visible: true,
         }
     }
@@ -200,15 +307,65 @@ impl Series {
             data: SeriesData::Line(points),
             candlestick_options: CandlestickOptions::default(),
             line_options: LineSeriesOptions::default(),
+            area_options: AreaSeriesOptions::default(),
+            histogram_options: HistogramSeriesOptions::default(),
+            baseline_options: BaselineSeriesOptions::default(),
             visible: true,
         }
+    }
+
+    /// Create a new area series (line + gradient fill)
+    pub fn area(id: u32, points: Vec<LineDataPoint>) -> Self {
+        Series {
+            id,
+            series_type: SeriesType::Area,
+            data: SeriesData::Line(points),
+            candlestick_options: CandlestickOptions::default(),
+            line_options: LineSeriesOptions::default(),
+            area_options: AreaSeriesOptions::default(),
+            histogram_options: HistogramSeriesOptions::default(),
+            baseline_options: BaselineSeriesOptions::default(),
+            visible: true,
+        }
+    }
+
+    /// Create a new histogram series
+    pub fn histogram(id: u32, points: Vec<HistogramDataPoint>) -> Self {
+        Series {
+            id,
+            series_type: SeriesType::Histogram,
+            data: SeriesData::Histogram(points),
+            candlestick_options: CandlestickOptions::default(),
+            line_options: LineSeriesOptions::default(),
+            area_options: AreaSeriesOptions::default(),
+            histogram_options: HistogramSeriesOptions::default(),
+            baseline_options: BaselineSeriesOptions::default(),
+            visible: true,
+        }
+    }
+
+    /// Create a new baseline series (line with top/bottom fills)
+    pub fn baseline(id: u32, points: Vec<LineDataPoint>, base_value: f64) -> Self {
+        let mut s = Series {
+            id,
+            series_type: SeriesType::Baseline,
+            data: SeriesData::Line(points),
+            candlestick_options: CandlestickOptions::default(),
+            line_options: LineSeriesOptions::default(),
+            area_options: AreaSeriesOptions::default(),
+            histogram_options: HistogramSeriesOptions::default(),
+            baseline_options: BaselineSeriesOptions::default(),
+            visible: true,
+        };
+        s.baseline_options.base_value = base_value;
+        s
     }
 
     /// Is this series bullish at a given bar?
     pub fn is_bullish_at(&self, index: usize) -> bool {
         match &self.data {
             SeriesData::Ohlc(bars) => bars.get(index).map_or(false, |b| b.close >= b.open),
-            SeriesData::Line(_) => true,
+            SeriesData::Line(_) | SeriesData::Histogram(_) => true,
         }
     }
 }
@@ -431,5 +588,98 @@ mod tests {
     fn test_series_data_is_empty() {
         assert!(SeriesData::Ohlc(vec![]).is_empty());
         assert!(!SeriesData::Line(vec![make_line_pt(1, 1.0)]).is_empty());
+    }
+
+    // --- New series type tests (Slice 6) ---
+
+    #[test]
+    fn test_area_series_create() {
+        let pts = vec![make_line_pt(1, 50.0), make_line_pt(2, 55.0)];
+        let s = Series::area(0, pts);
+        assert_eq!(s.series_type, SeriesType::Area);
+        assert_eq!(s.data.len(), 2);
+        // Area options should have defaults
+        assert_eq!(s.area_options.line_width, 2.0);
+    }
+
+    #[test]
+    fn test_histogram_series_create() {
+        let pts = vec![
+            HistogramDataPoint {
+                time: 1,
+                value: 100.0,
+                color: None,
+            },
+            HistogramDataPoint {
+                time: 2,
+                value: -50.0,
+                color: Some([1.0, 0.0, 0.0, 1.0]),
+            },
+        ];
+        let s = Series::histogram(0, pts);
+        assert_eq!(s.series_type, SeriesType::Histogram);
+        assert_eq!(s.data.len(), 2);
+    }
+
+    #[test]
+    fn test_baseline_series_create() {
+        let pts = vec![make_line_pt(1, 50.0)];
+        let s = Series::baseline(0, pts, 42.0);
+        assert_eq!(s.series_type, SeriesType::Baseline);
+        assert_eq!(s.baseline_options.base_value, 42.0);
+    }
+
+    #[test]
+    fn test_histogram_data_min_max() {
+        let data = SeriesData::Histogram(vec![
+            HistogramDataPoint {
+                time: 1,
+                value: 10.0,
+                color: None,
+            },
+            HistogramDataPoint {
+                time: 2,
+                value: -5.0,
+                color: None,
+            },
+            HistogramDataPoint {
+                time: 3,
+                value: 30.0,
+                color: None,
+            },
+        ]);
+        let (min, max) = data.min_max().unwrap();
+        assert!((min - (-5.0)).abs() < f64::EPSILON);
+        assert!((max - 30.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_histogram_data_value_at() {
+        let data = SeriesData::Histogram(vec![HistogramDataPoint {
+            time: 1,
+            value: 42.0,
+            color: None,
+        }]);
+        assert_eq!(data.value_at(0), Some(42.0));
+        assert_eq!(data.value_at(1), None);
+    }
+
+    #[test]
+    fn test_area_options_default() {
+        let opts = AreaSeriesOptions::default();
+        assert_eq!(opts.line_width, 2.0);
+    }
+
+    #[test]
+    fn test_histogram_options_default() {
+        let opts = HistogramSeriesOptions::default();
+        assert_eq!(opts.base, 0.0);
+    }
+
+    #[test]
+    fn test_baseline_options_default() {
+        let opts = BaselineSeriesOptions::default();
+        assert_eq!(opts.base_value, 0.0);
+        assert_eq!(opts.line_width, 2.0);
     }
 }

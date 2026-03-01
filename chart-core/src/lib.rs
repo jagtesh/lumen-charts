@@ -366,8 +366,57 @@ mod native {
             0 => crate::series::SeriesType::Ohlc,
             1 => crate::series::SeriesType::Candlestick,
             2 => crate::series::SeriesType::Line,
+            3 => crate::series::SeriesType::Area,
+            4 => crate::series::SeriesType::Histogram,
+            5 => crate::series::SeriesType::Baseline,
             _ => return false,
         };
         true
+    }
+
+    /// Add a new line series to the chart from an array of (time, value) pairs.
+    /// Returns the assigned series ID. Returns u32::MAX on error.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_add_line_series(
+        chart: *mut Chart,
+        times: *const i64,
+        values: *const f64,
+        count: u32,
+    ) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let times = unsafe { std::slice::from_raw_parts(times, count as usize) };
+        let values = unsafe { std::slice::from_raw_parts(values, count as usize) };
+
+        let points: Vec<crate::series::LineDataPoint> = times
+            .iter()
+            .zip(values.iter())
+            .map(|(&t, &v)| crate::series::LineDataPoint { time: t, value: v })
+            .collect();
+
+        let series = crate::series::Series::line(0, points);
+        chart.state.series.add(series)
+    }
+
+    /// Remove a series by its ID. Returns true if the series was found and removed.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_remove_series(chart: *mut Chart, series_id: u32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.series.remove(series_id)
+    }
+
+    /// Get the number of additional series on the chart.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_series_count(chart: *const Chart) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        chart.state.series.len() as u32
     }
 }
