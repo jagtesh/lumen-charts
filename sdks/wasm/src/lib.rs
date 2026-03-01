@@ -265,10 +265,31 @@ pub fn chart_add_candlestick_series(data: &[f64]) -> u32 {
 }
 
 #[wasm_bindgen]
+pub fn chart_add_baseline_series(data: &[f64], base_value: f64) -> u32 {
+    let count = (data.len() / 2) as u32;
+    let times: Vec<i64> = (0..count as usize).map(|i| data[i * 2] as i64).collect();
+    let values: Vec<f64> = (0..count as usize).map(|i| data[i * 2 + 1]).collect();
+    lumen_charts::chart_add_baseline_series(ptr(), times.as_ptr(), values.as_ptr(), count, base_value)
+}
+
+#[wasm_bindgen]
 pub fn chart_remove_series(id: u32) -> bool { lumen_charts::chart_remove_series(ptr(), id) }
+
+// === Series / Panes management ===
 
 #[wasm_bindgen]
 pub fn chart_series_count() -> u32 { lumen_charts::chart_series_count(ptr()) }
+
+#[wasm_bindgen]
+pub fn chart_add_pane(height_stretch: f32) -> u32 { lumen_charts::chart_add_pane(ptr(), height_stretch) }
+
+#[wasm_bindgen]
+pub fn chart_remove_pane(pane_id: u32) -> bool { lumen_charts::chart_remove_pane(ptr(), pane_id) }
+
+#[wasm_bindgen]
+pub fn chart_series_move_to_pane(series_id: u32, pane_id: u32) -> bool { 
+    lumen_charts::chart_series_move_to_pane(ptr(), series_id, pane_id) 
+}
 
 // === Options ===
 
@@ -276,6 +297,12 @@ pub fn chart_series_count() -> u32 { lumen_charts::chart_series_count(ptr()) }
 pub fn chart_apply_options(json: &str) -> bool {
     let cstr = std::ffi::CString::new(json).unwrap();
     lumen_charts::chart_apply_options(ptr(), cstr.as_ptr())
+}
+
+#[wasm_bindgen]
+pub fn chart_series_apply_options(series_id: u32, json: &str) -> bool {
+    let cstr = std::ffi::CString::new(json).unwrap();
+    lumen_charts::chart_series_apply_options(ptr(), series_id, cstr.as_ptr())
 }
 
 // === Coordinate translation ===

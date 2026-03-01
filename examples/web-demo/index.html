@@ -13,8 +13,9 @@
         }
 
         body {
-            background: #0a0a0d;
+            background: #202020;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
@@ -23,10 +24,12 @@
 
         #chart-container {
             width: 900px;
-            height: 600px;
-            border: 1px solid #2a2a35;
+            height: 500px;
+            border: 1px solid #333;
             border-radius: 8px;
             overflow: hidden;
+            margin-bottom: 20px;
+            background: #1f1f1f;
         }
 
         canvas {
@@ -40,15 +43,44 @@
             position: fixed;
             top: 16px;
             left: 16px;
-            color: #666;
+            color: #888;
             font-size: 13px;
         }
 
         #controls {
-            position: fixed;
-            bottom: 16px;
-            left: 16px;
-            color: #555;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 900px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            background: #333;
+            color: #eee;
+            border: 1px solid #444;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #444;
+        }
+
+        select {
+            background: #333;
+            color: #eee;
+            border: 1px solid #444;
+            padding: 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        #help {
+            color: #666;
             font-size: 12px;
         }
     </style>
@@ -60,34 +92,46 @@
         <canvas id="chart-canvas"></canvas>
     </div>
     <div id="controls">
+        <span style="color: #aaa; font-size: 13px;">Chart Type:</span>
+        <select id="sel-chart-type">
+            <option value="ohlc">OHLC</option>
+            <option value="candle">Candle</option>
+            <option value="line">Line</option>
+            <option value="area">Area</option>
+            <option value="hist">Histogram</option>
+            <option value="base">Baseline</option>
+        </select>
+        <button class="btn" id="btn-fit">Fit Content</button>
+        <button class="btn" id="btn-overlay">Toggle Overlay</button>
+        <button class="btn" id="btn-macd">Toggle MACD</button>
+    </div>
+    <div id="help">
         Scroll: pan &nbsp;|&nbsp; Ctrl+Scroll: zoom &nbsp;|&nbsp; Drag: pan &nbsp;|&nbsp;
         Drag Y-axis: zoom price &nbsp;|&nbsp; Double-click: fit all &nbsp;|&nbsp;
-        Arrow keys: navigate &nbsp;|&nbsp; Home: fit
+        Arrow keys: navigate
     </div>
 
     <script type="module">
-        import init, {
-            chart_start,
-            chart_pointer_move,
-            chart_pointer_down,
-            chart_pointer_up,
-            chart_pointer_leave,
-            chart_scroll,
-            chart_zoom,
-            chart_fit_content,
-            chart_key_down,
-            chart_tick,
-            chart_set_data,
-            chart_set_series_type,
-        } from './pkg/chart_wasm.js';
+        import { createChart } from './pkg/chart_api.js';
+
+        let chart;
+        let mainSeries;
+
+        let overlaySeries = null;
+        let macdPane = null;
+        let macdSeriesList = [];
+
+        let sampleDataCache = null;
 
         // Generate ~100 bars of AAPL-like data (same LCG as Rust/Swift)
         function generateSampleData() {
+            if (sampleDataCache) return sampleDataCache;
+
             const baseTime = 1704153600; // 2024-01-02 UTC
             const day = 86400;
             let price = 185.0;
             let rng = 42n;
-            const data = new Float64Array(100 * 5);
+            const data = [];
 
             function nextRand() {
                 rng = (rng * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn;
@@ -103,170 +147,189 @@
                 const high = Math.max(open, close) + dailyRange * Math.abs(nextRand());
                 const low = Math.min(open, close) - dailyRange * Math.abs(nextRand());
 
-                const base = i * 5;
-                data[base] = time;
-                data[base + 1] = open;
-                data[base + 2] = Math.max(high, Math.max(open, close));
-                data[base + 3] = Math.min(low, Math.min(open, close));
-                data[base + 4] = close;
+                // Store both ohlc and line value (close)
+                data.push({ time, open, high, low, close, value: close });
                 price = close;
             }
+            sampleDataCache = data;
             return data;
+        }
+
+        function generateOverlayData() {
+            const data = generateSampleData();
+            return data.map(d => ({
+                time: d.time,
+                value: d.close * (1.0 + Math.sin(d.time / 86400.0) * 0.05)
+            }));
+        }
+
+        // Ported calculateMACD from Swift
+        function calculateMACD(bars, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+            function calcEMA(data, period) {
+                const k = 2.0 / (period + 1);
+                let ema = [];
+                let currentEma = 0.0;
+                for (let i = 0; i < data.length; i++) {
+                    const price = data[i].close;
+                    if (i == 0) {
+                        currentEma = price;
+                    } else {
+                        currentEma = price * k + currentEma * (1.0 - k);
+                    }
+                    ema.push(currentEma);
+                }
+                return ema;
+            }
+
+            const fastEMA = calcEMA(bars, fastPeriod);
+            const slowEMA = calcEMA(bars, slowPeriod);
+            let macdValues = [];
+            for (let i = 0; i < bars.length; i++) {
+                macdValues.push({ time: bars[i].time, close: (fastEMA[i] - slowEMA[i]) });
+            }
+
+            const signalEMA = calcEMA(macdValues, signalPeriod);
+
+            let macdLine = [];
+            let signalLine = [];
+            let histogram = [];
+
+            for (let i = 0; i < bars.length; i++) {
+                const time = bars[i].time;
+                const macd = macdValues[i].close;
+                const signal = signalEMA[i];
+                const hist = macd - signal;
+
+                macdLine.push({ time, value: macd });
+                signalLine.push({ time, value: signal });
+
+                // Color formatting matching swift will be done via options/WASM later 
+                // Currently only values are passed
+                histogram.push({ time, value: hist });
+            }
+
+            return { macdLine, signalLine, histogram };
+        }
+
+        function recreateMainSeries(type) {
+            if (mainSeries) {
+                chart.removeSeries(mainSeries);
+            }
+            const data = generateSampleData();
+
+            switch (type) {
+                case 'ohlc':
+                    mainSeries = chart.addOhlcSeries({});
+                    break;
+                case 'candle':
+                    mainSeries = chart.addCandlestickSeries({
+                        upColor: '#26a69a', downColor: '#ef5350',
+                        borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+                        wickUpColor: '#26a69a', wickDownColor: '#ef5350'
+                    });
+                    break;
+                case 'line':
+                    mainSeries = chart.addLineSeries({ color: '#2962FF', lineWidth: 2 });
+                    break;
+                case 'area':
+                    mainSeries = chart.addAreaSeries({
+                        topColor: 'rgba(41, 98, 255, 0.4)',
+                        bottomColor: 'rgba(41, 98, 255, 0.0)',
+                        lineColor: '#2962FF', lineWidth: 2
+                    });
+                    break;
+                case 'hist':
+                    mainSeries = chart.addHistogramSeries({ color: '#26a69a' });
+                    break;
+                case 'base':
+                    mainSeries = chart.addBaselineSeries({
+                        topLineColor: '#26a69a', topFillColor1: 'rgba(38, 166, 154, 0.28)', topFillColor2: 'rgba(38, 166, 154, 0.05)',
+                        bottomLineColor: '#ef5350', bottomFillColor1: 'rgba(239, 83, 80, 0.05)', bottomFillColor2: 'rgba(239, 83, 80, 0.28)'
+                    }, 185.0);
+                    break;
+            }
+            mainSeries.setData(data);
         }
 
         async function run() {
             const status = document.getElementById('status');
 
-            if (!navigator.gpu) {
-                status.textContent = '❌ WebGPU not supported in this browser.';
-                status.style.color = '#ef5350';
-                return;
-            }
-
             try {
-                status.textContent = '⏳ Loading WASM module...';
-                await init();
-                await chart_start();
+                chart = await createChart(document.getElementById('chart-container'));
 
-                // Load sample data from JS
-                const data = generateSampleData();
-                chart_set_data(data);
-                chart_fit_content();
+                // Apply initial options
+                chart.applyOptions({
+                    layout: { background: { color: "#1f1f1f" }, textColor: "#d1d4dc" },
+                    grid: { vertLines: { color: "#333" }, horzLines: { color: "#333" } }
+                });
 
-                status.textContent = '✅ Chart rendered — 100 bars from JS';
+                recreateMainSeries('ohlc');
+                chart.fitContent();
+
+                status.textContent = 'OHLC Bars • 100 bars from JS';
                 status.style.color = '#26a69a';
             } catch (e) {
-                console.error('Failed to initialize:', e);
+                console.error(e);
                 status.textContent = `❌ Error: ${e.message}`;
                 status.style.color = '#ef5350';
                 return;
             }
 
-            // --- Wire up interactions ---
-            const canvas = document.getElementById('chart-canvas');
-            const rect = () => canvas.getBoundingClientRect();
+            // Wire UI buttons
+            const typeNames = {
+                'ohlc': 'OHLC Bars', 'candle': 'Candlestick', 'line': 'Line',
+                'area': 'Area', 'hist': 'Histogram', 'base': 'Baseline'
+            };
 
-            // Convert page coords to chart logical coords
-            function toChart(e) {
-                const r = rect();
-                return {
-                    x: e.clientX - r.left,
-                    y: e.clientY - r.top,
-                };
-            }
-
-            // Pointer move → crosshair
-            canvas.addEventListener('mousemove', (e) => {
-                const p = toChart(e);
-                chart_pointer_move(p.x, p.y);
+            document.getElementById('sel-chart-type').addEventListener('change', (e) => {
+                recreateMainSeries(e.target.value);
+                status.textContent = `${typeNames[e.target.value]} • data from JS`;
             });
 
-            // Pointer down → drag start (dbl-click now handled in Rust via pointer_up)
-            canvas.addEventListener('mousedown', (e) => {
-                const p = toChart(e);
-                chart_pointer_down(p.x, p.y);
+            document.getElementById('btn-fit').addEventListener('click', () => {
+                chart.fitContent();
             });
 
-            // Pointer up → drag end
-            canvas.addEventListener('mouseup', (e) => {
-                const p = toChart(e);
-                chart_pointer_up(p.x, p.y);
-            });
-
-            // Pointer leave → hide crosshair
-            canvas.addEventListener('mouseleave', () => {
-                chart_pointer_leave();
-            });
-
-            // Wheel → pan or zoom
-            canvas.addEventListener('wheel', (e) => {
-                e.preventDefault();
-                const p = toChart(e);
-
-                if (e.ctrlKey || e.metaKey) {
-                    // Ctrl/Cmd + scroll = zoom
-                    const factor = 1.0 - e.deltaY * 0.005;
-                    chart_zoom(factor, p.x);
+            document.getElementById('btn-overlay').addEventListener('click', () => {
+                if (overlaySeries) {
+                    chart.removeSeries(overlaySeries);
+                    overlaySeries = null;
                 } else {
-                    // Regular scroll = pan
-                    chart_scroll(-e.deltaX, e.deltaY);
-                }
-            }, { passive: false });
-
-            // Touch support for pinch zoom
-            let lastTouchDistance = 0;
-            let lastTouchCenter = { x: 0, y: 0 };
-
-            canvas.addEventListener('touchstart', (e) => {
-                if (e.touches.length === 1) {
-                    const p = toChart(e.touches[0]);
-                    chart_pointer_down(p.x, p.y);
-                } else if (e.touches.length === 2) {
-                    const dx = e.touches[1].clientX - e.touches[0].clientX;
-                    const dy = e.touches[1].clientY - e.touches[0].clientY;
-                    lastTouchDistance = Math.sqrt(dx * dx + dy * dy);
-                    lastTouchCenter = toChart({
-                        clientX: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-                        clientY: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+                    overlaySeries = chart.addAreaSeries({
+                        topColor: 'rgba(26, 153, 230, 0.4)',
+                        bottomColor: 'rgba(26, 153, 230, 0.0)',
+                        lineColor: 'rgba(26, 153, 230, 1.0)',
+                        lineWidth: 2
                     });
-                }
-                e.preventDefault();
-            }, { passive: false });
-
-            canvas.addEventListener('touchmove', (e) => {
-                if (e.touches.length === 1) {
-                    const p = toChart(e.touches[0]);
-                    chart_pointer_move(p.x, p.y);
-                } else if (e.touches.length === 2) {
-                    const dx = e.touches[1].clientX - e.touches[0].clientX;
-                    const dy = e.touches[1].clientY - e.touches[0].clientY;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (lastTouchDistance > 0) {
-                        const factor = dist / lastTouchDistance;
-                        const center = toChart({
-                            clientX: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-                            clientY: (e.touches[0].clientY + e.touches[1].clientY) / 2,
-                        });
-                        chart_zoom(factor, center.x);
-                    }
-                    lastTouchDistance = dist;
-                }
-                e.preventDefault();
-            }, { passive: false });
-
-            canvas.addEventListener('touchend', (e) => {
-                if (e.touches.length === 0) {
-                    chart_pointer_up(0, 0);
-                    lastTouchDistance = 0;
-                }
-                e.preventDefault();
-            }, { passive: false });
-
-            // Keyboard navigation
-            const container = document.getElementById('chart-container');
-            container.addEventListener('keydown', (e) => {
-                const keyMap = {
-                    'ArrowLeft': 37, 'ArrowRight': 39,
-                    'ArrowUp': 38, 'ArrowDown': 40,
-                    '+': 187, '=': 187, '-': 189,
-                    'Home': 36, 'End': 35,
-                };
-                const code = keyMap[e.key];
-                if (code !== undefined) {
-                    e.preventDefault();
-                    chart_key_down(code);
+                    overlaySeries.setData(generateOverlayData());
                 }
             });
 
-            // Focus the container for keyboard events
-            container.focus();
+            document.getElementById('btn-macd').addEventListener('click', () => {
+                if (macdPane) {
+                    macdSeriesList.forEach(s => chart.removeSeries(s));
+                    macdSeriesList = [];
+                    chart.removePane(macdPane);
+                    macdPane = null;
+                } else {
+                    macdPane = chart.addPane(0.3);
+                    const macd = calculateMACD(generateSampleData());
 
-            // Frame tick for render/animations
-            function frameTick() {
-                chart_tick();
-                requestAnimationFrame(frameTick);
-            }
-            requestAnimationFrame(frameTick);
+                    const histSeries = chart.addHistogramSeries({});
+                    histSeries.moveToPane(macdPane);
+                    histSeries.setData(macd.histogram); // Colors skipped for brevity 
+
+                    const macdLineSeries = chart.addLineSeries({ color: 'rgb(51, 153, 255)', lineWidth: 1.5 });
+                    macdLineSeries.moveToPane(macdPane);
+                    macdLineSeries.setData(macd.macdLine);
+
+                    const signalSeries = chart.addLineSeries({ color: 'rgb(255, 153, 51)', lineWidth: 1.5 });
+                    signalSeries.moveToPane(macdPane);
+                    signalSeries.setData(macd.signalLine);
+
+                    macdSeriesList = [histSeries, macdLineSeries, signalSeries];
+                }
+            });
         }
 
         run();

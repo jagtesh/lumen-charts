@@ -14,6 +14,9 @@ fi
 
 wasm-pack build "$WASM_SDK" --target web --out-dir "$PKG_DIR"
 
+# Copy the JS wrapper API into the package directory
+cp "$WASM_SDK/chart_api.js" "$PKG_DIR/"
+
 echo ""
 echo "✅ Build complete. Serving at http://localhost:$PORT"
 echo "   (Open in Chrome 113+ or Safari 18+ for WebGPU support)"
