@@ -173,23 +173,134 @@ class ChartView: NSView {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Toolbar
+// ---------------------------------------------------------------------------
+
+class ToolbarView: NSView {
+    var onSeriesTypeChanged: ((UInt32) -> Void)?
+    var onFitContent: (() -> Void)?
+    var statusLabel: NSTextField!
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 1.0).cgColor
+
+        // --- Series Type Segmented Control ---
+        let seriesLabel = makeLabel("Chart Type:")
+        seriesLabel.frame = NSRect(x: 12, y: 6, width: 80, height: 20)
+        addSubview(seriesLabel)
+
+        let seriesControl = NSSegmentedControl(labels: ["OHLC", "Candle", "Line"], trackingMode: .selectOne, target: self, action: #selector(seriesTypeChanged(_:)))
+        seriesControl.selectedSegment = 0
+        seriesControl.frame = NSRect(x: 92, y: 4, width: 200, height: 24)
+        seriesControl.segmentStyle = .roundRect
+        addSubview(seriesControl)
+
+        // --- Actions ---
+        let fitBtn = makeButton("Fit Content", action: #selector(fitContentTapped))
+        fitBtn.frame = NSRect(x: 310, y: 4, width: 100, height: 24)
+        addSubview(fitBtn)
+
+        // --- Status label ---
+        statusLabel = makeLabel("OHLC Bars")
+        statusLabel.frame = NSRect(x: 430, y: 6, width: 300, height: 20)
+        statusLabel.textColor = NSColor(calibratedWhite: 0.5, alpha: 1.0)
+        addSubview(statusLabel)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc func seriesTypeChanged(_ sender: NSSegmentedControl) {
+        let typeNames = ["OHLC Bars", "Candlestick", "Line"]
+        statusLabel.stringValue = typeNames[sender.selectedSegment]
+        onSeriesTypeChanged?(UInt32(sender.selectedSegment))
+    }
+
+    @objc func fitContentTapped() {
+        onFitContent?()
+    }
+
+    private func makeLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        label.textColor = NSColor(calibratedWhite: 0.7, alpha: 1.0)
+        return label
+    }
+
+    private func makeButton(_ title: String, action: Selector) -> NSButton {
+        let btn = NSButton(title: title, target: self, action: action)
+        btn.bezelStyle = .rounded
+        btn.font = NSFont.systemFont(ofSize: 11)
+        return btn
+    }
+}
+
+// ---------------------------------------------------------------------------
+// App Delegate
+// ---------------------------------------------------------------------------
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var chartView: ChartView!
+    var toolbar: ToolbarView!
+
+    let toolbarHeight: CGFloat = 32
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let windowRect = NSRect(x: 100, y: 100, width: 1000, height: 700)
+        let windowRect = NSRect(x: 100, y: 100, width: 1000, height: 732)
         window = NSWindow(
             contentRect: windowRect,
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Chart MVP — Rust Core + Swift Demo (Interactive)"
+        window.title = "Chart MVP — Rust Core + Swift Demo"
         window.center()
+        window.minSize = NSSize(width: 600, height: 400)
 
-        chartView = ChartView(frame: windowRect)
-        window.contentView = chartView
+        // Container
+        let container = NSView(frame: windowRect)
+        container.autoresizesSubviews = true
+
+        // Toolbar at top
+        toolbar = ToolbarView(frame: NSRect(
+            x: 0,
+            y: windowRect.height - toolbarHeight,
+            width: windowRect.width,
+            height: toolbarHeight
+        ))
+        toolbar.autoresizingMask = [.width, .minYMargin]
+        container.addSubview(toolbar)
+
+        // Chart fills the rest
+        chartView = ChartView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: windowRect.width,
+            height: windowRect.height - toolbarHeight
+        ))
+        chartView.autoresizingMask = [.width, .height]
+        container.addSubview(chartView)
+
+        window.contentView = container
+
+        // Wire up toolbar actions
+        toolbar.onSeriesTypeChanged = { [weak self] typeId in
+            guard let chart = self?.chartView.chart else { return }
+            if chart_set_series_type(chart, typeId) {
+                chart_render(chart)
+            }
+        }
+
+        toolbar.onFitContent = { [weak self] in
+            guard let chart = self?.chartView.chart else { return }
+            if chart_fit_content(chart) {
+                chart_render(chart)
+            }
+        }
+
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(chartView)
     }
