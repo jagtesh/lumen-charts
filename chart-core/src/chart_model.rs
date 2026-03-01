@@ -68,4 +68,12 @@ impl ChartLayout {
             plot_area,
         }
     }
+
+    /// Test if a point (logical coords) is inside the plot area
+    pub fn plot_area_contains(&self, x: f32, y: f32) -> bool {
+        x >= self.plot_area.x
+            && x <= self.plot_area.x + self.plot_area.width
+            && y >= self.plot_area.y
+            && y <= self.plot_area.y + self.plot_area.height
+    }
 }

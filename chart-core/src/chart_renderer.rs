@@ -2,41 +2,43 @@ use vello::kurbo::{Affine, Line, Rect as KurboRect, Stroke};
 use vello::peniko::Color;
 use vello::Scene;
 
-use crate::chart_model::{ChartData, ChartLayout, Rect};
-use crate::price_scale::PriceScale;
+use crate::chart_model::Rect;
+use crate::chart_state::ChartState;
 use crate::tick_marks::{generate_price_ticks, generate_time_ticks, TickMark};
-use crate::time_scale::TimeScale;
 
 // Colors
 const BG_COLOR: Color = Color::new([0.07, 0.07, 0.10, 1.0]);
 const GRID_COLOR: Color = Color::new([0.15, 0.15, 0.20, 1.0]);
 const AXIS_COLOR: Color = Color::new([0.4, 0.4, 0.5, 1.0]);
-const BULL_COLOR: Color = Color::new([0.15, 0.65, 0.60, 1.0]); // #26a69a
-const BEAR_COLOR: Color = Color::new([0.94, 0.33, 0.31, 1.0]); // #ef5350
+const BULL_COLOR: Color = Color::new([0.15, 0.65, 0.60, 1.0]);
+const BEAR_COLOR: Color = Color::new([0.94, 0.33, 0.31, 1.0]);
 const TEXT_COLOR: Color = Color::new([0.6, 0.6, 0.7, 1.0]);
+const CROSSHAIR_COLOR: Color = Color::new([0.5, 0.5, 0.6, 0.8]);
 
-/// Render the entire chart into a Vello Scene
-pub fn render_chart(scene: &mut Scene, data: &ChartData, layout: &ChartLayout) {
-    if data.bars.is_empty() {
+/// Render the entire chart from ChartState into a Vello Scene
+pub fn render_chart(scene: &mut Scene, state: &ChartState) {
+    if state.data.bars.is_empty() {
         return;
     }
 
-    let price_scale = PriceScale::from_data(&data.bars);
-    let time_scale = TimeScale::new(data.bars.len(), &layout.plot_area);
-    let price_ticks = generate_price_ticks(&price_scale, &layout.plot_area);
-    let time_ticks = generate_time_ticks(&data.bars, &time_scale, &layout.plot_area);
+    let layout = &state.layout;
+    let price_ticks = generate_price_ticks(&state.price_scale, &layout.plot_area);
+    let time_ticks = generate_time_ticks(&state.data.bars, &state.time_scale, &layout.plot_area);
 
-    // HiDPI: scale all drawing from logical coordinates to physical pixels
     let t = Affine::scale(layout.scale_factor);
 
     draw_background(scene, layout, t);
     draw_grid(scene, &price_ticks, &time_ticks, &layout.plot_area, t);
-    draw_ohlc_bars(scene, data, &time_scale, &price_scale, &layout.plot_area, t);
+    draw_ohlc_bars(scene, state, t);
     draw_y_axis(scene, &price_ticks, layout, t);
     draw_x_axis(scene, &time_ticks, layout, t);
+
+    if state.crosshair.visible {
+        draw_crosshair(scene, state, t);
+    }
 }
 
-fn draw_background(scene: &mut Scene, layout: &ChartLayout, t: Affine) {
+fn draw_background(scene: &mut Scene, layout: &crate::chart_model::ChartLayout, t: Affine) {
     scene.fill(
         vello::peniko::Fill::NonZero,
         t,
@@ -55,7 +57,6 @@ fn draw_grid(
 ) {
     let stroke = Stroke::new(1.0);
 
-    // Horizontal grid lines (at price ticks)
     for tick in price_ticks {
         let y = tick.coord as f64;
         scene.stroke(
@@ -70,7 +71,6 @@ fn draw_grid(
         );
     }
 
-    // Vertical grid lines (at time ticks)
     for tick in time_ticks {
         let x = tick.coord as f64;
         scene.stroke(
@@ -85,7 +85,6 @@ fn draw_grid(
         );
     }
 
-    // Plot area border
     scene.stroke(
         &Stroke::new(1.0),
         t,
@@ -100,36 +99,42 @@ fn draw_grid(
     );
 }
 
-fn draw_ohlc_bars(
-    scene: &mut Scene,
-    data: &ChartData,
-    time_scale: &TimeScale,
-    price_scale: &PriceScale,
-    plot_area: &Rect,
-    t: Affine,
-) {
-    let bar_width = time_scale.bar_spacing * 0.3;
+fn draw_ohlc_bars(scene: &mut Scene, state: &ChartState, t: Affine) {
+    let bar_width = state.time_scale.bar_spacing * 0.3;
     let line_width = 1.5;
+    let plot_area = &state.layout.plot_area;
 
-    for (i, bar) in data.bars.iter().enumerate() {
-        let x = time_scale.index_to_x(i, plot_area) as f64;
-        let high_y = price_scale.price_to_y(bar.high, plot_area) as f64;
-        let low_y = price_scale.price_to_y(bar.low, plot_area) as f64;
-        let open_y = price_scale.price_to_y(bar.open, plot_area) as f64;
-        let close_y = price_scale.price_to_y(bar.close, plot_area) as f64;
+    // Only draw visible bars
+    let (first, last) = state.time_scale.visible_range(plot_area.width);
+    let first = first.saturating_sub(1); // draw one extra on each side for partial visibility
+    let last = (last + 1).min(state.data.bars.len());
+
+    for i in first..last {
+        let bar = &state.data.bars[i];
+        let x = state.time_scale.index_to_x(i, plot_area) as f64;
+
+        // Skip bars fully outside plot area
+        if x < (plot_area.x - bar_width) as f64
+            || x > (plot_area.x + plot_area.width + bar_width) as f64
+        {
+            continue;
+        }
+
+        let high_y = state.price_scale.price_to_y(bar.high, plot_area) as f64;
+        let low_y = state.price_scale.price_to_y(bar.low, plot_area) as f64;
+        let open_y = state.price_scale.price_to_y(bar.open, plot_area) as f64;
+        let close_y = state.price_scale.price_to_y(bar.close, plot_area) as f64;
 
         let color = if bar.close >= bar.open {
             BULL_COLOR
         } else {
             BEAR_COLOR
         };
-
         let stroke = Stroke::new(line_width);
 
-        // Vertical line: high to low
+        // High-Low line
         scene.stroke(&stroke, t, color, None, &Line::new((x, high_y), (x, low_y)));
-
-        // Left tick: open
+        // Open tick (left)
         scene.stroke(
             &stroke,
             t,
@@ -137,8 +142,7 @@ fn draw_ohlc_bars(
             None,
             &Line::new((x - bar_width as f64, open_y), (x, open_y)),
         );
-
-        // Right tick: close
+        // Close tick (right)
         scene.stroke(
             &stroke,
             t,
@@ -149,11 +153,102 @@ fn draw_ohlc_bars(
     }
 }
 
-fn draw_y_axis(scene: &mut Scene, price_ticks: &[TickMark], layout: &ChartLayout, t: Affine) {
+fn draw_crosshair(scene: &mut Scene, state: &ChartState, t: Affine) {
+    let plot = &state.layout.plot_area;
+    let x = state.crosshair.x as f64;
+    let y = state.crosshair.y as f64;
+
+    let dash_stroke = Stroke::new(1.0).with_dashes(0.0, &[4.0, 4.0]);
+
+    // Vertical line
+    scene.stroke(
+        &dash_stroke,
+        t,
+        CROSSHAIR_COLOR,
+        None,
+        &Line::new((x, plot.y as f64), (x, (plot.y + plot.height) as f64)),
+    );
+
+    // Horizontal line
+    scene.stroke(
+        &dash_stroke,
+        t,
+        CROSSHAIR_COLOR,
+        None,
+        &Line::new((plot.x as f64, y), ((plot.x + plot.width) as f64, y)),
+    );
+
+    // Price label background on Y-axis
+    if let Some(price) = state.crosshair.price {
+        let label_x = (plot.x + plot.width + 2.0) as f64;
+        let label_w = (state.layout.margins.right - 4.0) as f64;
+        let label_h = 18.0;
+        let label_y = y - label_h / 2.0;
+
+        scene.fill(
+            vello::peniko::Fill::NonZero,
+            t,
+            Color::new([0.2, 0.2, 0.3, 0.9]),
+            None,
+            &KurboRect::new(label_x, label_y, label_x + label_w, label_y + label_h),
+        );
+
+        // Price text (placeholder)
+        let label = format!("{:.2}", price);
+        draw_text_label(
+            scene,
+            &label,
+            label_x + 4.0,
+            label_y + 13.0,
+            10.0,
+            Color::WHITE,
+            t,
+        );
+    }
+
+    // Bar info label at top when hovering a bar
+    if let Some(idx) = state.crosshair.bar_index {
+        if idx < state.data.bars.len() {
+            let bar = &state.data.bars[idx];
+            let info = format!(
+                "O:{:.2} H:{:.2} L:{:.2} C:{:.2}",
+                bar.open, bar.high, bar.low, bar.close
+            );
+
+            // Background
+            let info_w = info.len() as f64 * 6.5 + 12.0;
+            let info_x = plot.x as f64 + 8.0;
+            let info_y = plot.y as f64 + 4.0;
+            scene.fill(
+                vello::peniko::Fill::NonZero,
+                t,
+                Color::new([0.12, 0.12, 0.18, 0.9]),
+                None,
+                &KurboRect::new(info_x, info_y, info_x + info_w, info_y + 20.0),
+            );
+
+            draw_text_label(
+                scene,
+                &info,
+                info_x + 6.0,
+                info_y + 14.0,
+                10.0,
+                TEXT_COLOR,
+                t,
+            );
+        }
+    }
+}
+
+fn draw_y_axis(
+    scene: &mut Scene,
+    price_ticks: &[TickMark],
+    layout: &crate::chart_model::ChartLayout,
+    t: Affine,
+) {
     let x_start = layout.plot_area.x + layout.plot_area.width + 5.0;
 
     for tick in price_ticks {
-        // Small tick mark
         scene.stroke(
             &Stroke::new(1.0),
             t,
@@ -183,11 +278,15 @@ fn draw_y_axis(scene: &mut Scene, price_ticks: &[TickMark], layout: &ChartLayout
     }
 }
 
-fn draw_x_axis(scene: &mut Scene, time_ticks: &[TickMark], layout: &ChartLayout, t: Affine) {
+fn draw_x_axis(
+    scene: &mut Scene,
+    time_ticks: &[TickMark],
+    layout: &crate::chart_model::ChartLayout,
+    t: Affine,
+) {
     let y_start = layout.plot_area.y + layout.plot_area.height + 5.0;
 
     for tick in time_ticks {
-        // Small tick mark
         scene.stroke(
             &Stroke::new(1.0),
             t,
@@ -251,7 +350,7 @@ fn draw_text_label(
                 let dot = KurboRect::new(cx + 2.0, y - 3.0, cx + 4.0, y - 1.0);
                 scene.fill(vello::peniko::Fill::NonZero, t, color, None, &dot);
             }
-            '-' => {
+            '-' | ':' => {
                 scene.stroke(
                     &Stroke::new(1.0),
                     t,

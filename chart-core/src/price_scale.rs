@@ -37,4 +37,61 @@ impl PriceScale {
         let normalized = (price - self.min_price) / range;
         plot_area.y + plot_area.height * (1.0 - normalized as f32)
     }
+
+    /// Convert y pixel coordinate to price value (inverse of price_to_y)
+    pub fn y_to_price(&self, y: f32, plot_area: &Rect) -> f64 {
+        let range = self.max_price - self.min_price;
+        if range == 0.0 {
+            return self.min_price;
+        }
+        let normalized = 1.0 - ((y - plot_area.y) / plot_area.height) as f64;
+        self.min_price + normalized * range
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_bar(low: f64, high: f64) -> OhlcBar {
+        OhlcBar {
+            time: 0,
+            open: low,
+            high,
+            low,
+            close: high,
+        }
+    }
+
+    fn make_plot_area() -> Rect {
+        Rect {
+            x: 10.0,
+            y: 20.0,
+            width: 800.0,
+            height: 400.0,
+        }
+    }
+
+    #[test]
+    fn test_price_to_y_and_back() {
+        let bars = vec![make_bar(100.0, 200.0)];
+        let ps = PriceScale::from_data(&bars);
+        let area = make_plot_area();
+
+        let price = 150.0;
+        let y = ps.price_to_y(price, &area);
+        let back = ps.y_to_price(y, &area);
+        assert!((back - price).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_high_price_is_low_y() {
+        let bars = vec![make_bar(100.0, 200.0)];
+        let ps = PriceScale::from_data(&bars);
+        let area = make_plot_area();
+
+        let y_high = ps.price_to_y(200.0, &area);
+        let y_low = ps.price_to_y(100.0, &area);
+        assert!(y_high < y_low); // Higher price = lower pixel y
+    }
 }

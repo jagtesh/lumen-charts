@@ -1,73 +1,154 @@
 import AppKit
 import QuartzCore
+import Metal
 import CChartCore
 
-// ---------------------------------------------------------------------------
-// MARK: - ChartView (NSView backed by CAMetalLayer)
-// ---------------------------------------------------------------------------
-
 class ChartView: NSView {
-    private var chart: OpaquePointer?
-    private var metalLayer: CAMetalLayer!
+    var metalLayer: CAMetalLayer!
+    var chart: OpaquePointer?
+    var trackingArea: NSTrackingArea?
+    var scaleFactor: Double = 2.0
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        wantsLayer = true
-    }
+    override var wantsLayer: Bool { get { true } set {} }
+    override var isFlipped: Bool { true }
 
     override func makeBackingLayer() -> CALayer {
         metalLayer = CAMetalLayer()
         metalLayer.device = MTLCreateSystemDefaultDevice()
         metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
-        metalLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
+        scaleFactor = Double(NSScreen.main?.backingScaleFactor ?? 2.0)
+        metalLayer.contentsScale = CGFloat(scaleFactor)
         return metalLayer
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard let window = window else { return }
+        guard let _ = window else { return }
 
-        let scaleFactor = window.backingScaleFactor
-        metalLayer.contentsScale = scaleFactor
-
-        // Create the Rust chart, passing the CAMetalLayer pointer
         let layerPtr = Unmanaged.passUnretained(metalLayer).toOpaque()
         let size = bounds.size
         chart = chart_create(
             UInt32(size.width),
             UInt32(size.height),
-            Double(scaleFactor),
+            scaleFactor,
             layerPtr
         )
 
         // Initial render
-        render()
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-
-        guard let chart = chart else { return }
-        let scaleFactor = window?.backingScaleFactor ?? 2.0
-        metalLayer.contentsScale = scaleFactor
-        metalLayer.drawableSize = CGSize(
-            width: newSize.width * scaleFactor,
-            height: newSize.height * scaleFactor
-        )
-
-        chart_resize(chart, UInt32(newSize.width), UInt32(newSize.height), Double(scaleFactor))
-        render()
-    }
-
-    func render() {
-        guard let chart = chart else { return }
         chart_render(chart)
+
+        // Setup tracking area for mouse events
+        updateTrackingArea()
+    }
+
+    func updateTrackingArea() {
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea!)
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    // --- Mouse move → crosshair ---
+    override func mouseMoved(with event: NSEvent) {
+        guard let chart = chart else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        if chart_pointer_move(chart, Float(p.x), Float(p.y)) {
+            chart_render(chart)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let chart = chart else { return }
+        let p = convert(event.locationInWindow, from: nil)
+
+        if event.clickCount == 2 {
+            // Double click → fit content
+            if chart_fit_content(chart) {
+                chart_render(chart)
+            }
+            return
+        }
+
+        if chart_pointer_down(chart, Float(p.x), Float(p.y), 0) {
+            chart_render(chart)
+        }
+    }
+
+    // --- Mouse drag → pan ---
+    override func mouseDragged(with event: NSEvent) {
+        guard let chart = chart else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        if chart_pointer_move(chart, Float(p.x), Float(p.y)) {
+            chart_render(chart)
+        }
+    }
+
+    // --- Mouse up → drag end ---
+    override func mouseUp(with event: NSEvent) {
+        guard let chart = chart else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        if chart_pointer_up(chart, Float(p.x), Float(p.y), 0) {
+            chart_render(chart)
+        }
+    }
+
+    // --- Mouse exited → hide crosshair ---
+    override func mouseExited(with event: NSEvent) {
+        guard let chart = chart else { return }
+        if chart_pointer_leave(chart) {
+            chart_render(chart)
+        }
+    }
+
+    // --- Scroll wheel → pan or zoom ---
+    override func scrollWheel(with event: NSEvent) {
+        guard let chart = chart else { return }
+        var needsRedraw = false
+
+        if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) {
+            // Cmd/Ctrl + scroll = zoom
+            let factor: Float = 1.0 + Float(event.scrollingDeltaY) * 0.02
+            let p = convert(event.locationInWindow, from: nil)
+            needsRedraw = chart_zoom(chart, factor, Float(p.x))
+        } else {
+            // Regular scroll = horizontal pan
+            needsRedraw = chart_scroll(chart, Float(-event.scrollingDeltaX), Float(event.scrollingDeltaY))
+        }
+
+        if needsRedraw {
+            chart_render(chart)
+        }
+    }
+
+    // --- Magnify gesture (trackpad pinch) ---
+    override func magnify(with event: NSEvent) {
+        guard let chart = chart else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        let factor = Float(1.0 + event.magnification)
+        if chart_pinch(chart, factor, Float(p.x), Float(p.y)) {
+            chart_render(chart)
+        }
+    }
+
+
+    // --- Resize ---
+    override func layout() {
+        super.layout()
+        guard let chart = chart else { return }
+        let size = bounds.size
+        if size.width > 0 && size.height > 0 {
+            chart_resize(chart, UInt32(size.width), UInt32(size.height), scaleFactor)
+            chart_render(chart)
+        }
     }
 
     deinit {
@@ -77,40 +158,31 @@ class ChartView: NSView {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MARK: - App Delegate
-// ---------------------------------------------------------------------------
-
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var chartView: ChartView!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let windowRect = NSRect(x: 100, y: 100, width: 900, height: 600)
+        let windowRect = NSRect(x: 100, y: 100, width: 1000, height: 700)
         window = NSWindow(
             contentRect: windowRect,
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Chart MVP — Rust Core + Swift Demo"
-        window.minSize = NSSize(width: 400, height: 300)
+        window.title = "Chart MVP — Rust Core + Swift Demo (Interactive)"
+        window.center()
 
         chartView = ChartView(frame: windowRect)
         window.contentView = chartView
         window.makeKeyAndOrderFront(nil)
-    }
-
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+        window.makeFirstResponder(chartView)
     }
 }
 
-// ---------------------------------------------------------------------------
-// MARK: - Entry Point
-// ---------------------------------------------------------------------------
-
+// --- Main ---
 let app = NSApplication.shared
+app.setActivationPolicy(.regular)
 let delegate = AppDelegate()
 app.delegate = delegate
 app.run()

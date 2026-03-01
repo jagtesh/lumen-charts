@@ -1,5 +1,6 @@
 pub mod chart_model;
 pub mod chart_renderer;
+pub mod chart_state;
 pub mod price_scale;
 pub mod sample_data;
 pub mod tick_marks;
@@ -12,19 +13,17 @@ pub mod time_scale;
 mod native {
     use std::ffi::c_void;
 
-    use crate::chart_model::{ChartData, ChartLayout};
+    use crate::chart_model::ChartData;
     use crate::chart_renderer::render_chart;
+    use crate::chart_state::ChartState;
     use crate::sample_data::sample_data;
 
     use vello::wgpu;
     use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
 
-    /// Opaque chart handle passed to Swift via C-ABI
+    /// Opaque chart handle passed via C-ABI
     pub struct Chart {
-        data: ChartData,
-        width: u32,
-        height: u32,
-        scale_factor: f64,
+        state: ChartState,
         scene: Scene,
         device: wgpu::Device,
         queue: wgpu::Queue,
@@ -32,6 +31,8 @@ mod native {
         surface_config: wgpu::SurfaceConfiguration,
         vello_renderer: VelloRenderer,
     }
+
+    // ----- Lifecycle -----
 
     #[no_mangle]
     pub extern "C" fn chart_create(
@@ -45,6 +46,7 @@ mod native {
         let data = ChartData {
             bars: sample_data(),
         };
+        let state = ChartState::new(data, width as f32, height as f32, scale_factor);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::METAL,
@@ -108,10 +110,7 @@ mod native {
         .expect("Failed to create Vello renderer");
 
         let chart = Chart {
-            data,
-            width,
-            height,
-            scale_factor,
+            state,
             scene: Scene::new(),
             device,
             queue,
@@ -131,8 +130,7 @@ mod native {
         };
 
         chart.scene.reset();
-        let layout = ChartLayout::new(chart.width as f32, chart.height as f32, chart.scale_factor);
-        render_chart(&mut chart.scene, &chart.data, &layout);
+        render_chart(&mut chart.scene, &chart.state);
 
         let surface_texture = match chart.surface.get_current_texture() {
             Ok(t) => t,
@@ -170,9 +168,9 @@ mod native {
             &mut *chart
         };
 
-        chart.width = width;
-        chart.height = height;
-        chart.scale_factor = scale_factor;
+        chart
+            .state
+            .resize(width as f32, height as f32, scale_factor);
 
         let physical_width = (width as f64 * scale_factor) as u32;
         let physical_height = (height as f64 * scale_factor) as u32;
@@ -193,5 +191,84 @@ mod native {
                 drop(Box::from_raw(chart));
             }
         }
+    }
+
+    // ----- Interaction C-ABI (all return bool: needs_redraw) -----
+
+    #[no_mangle]
+    pub extern "C" fn chart_pointer_move(chart: *mut Chart, x: f32, y: f32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.pointer_move(x, y)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_pointer_down(chart: *mut Chart, x: f32, y: f32, button: u8) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.pointer_down(x, y, button)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_pointer_up(chart: *mut Chart, x: f32, y: f32, button: u8) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.pointer_up(x, y, button)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_pointer_leave(chart: *mut Chart) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.pointer_leave()
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_scroll(chart: *mut Chart, delta_x: f32, delta_y: f32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.scroll(delta_x, delta_y)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_zoom(chart: *mut Chart, factor: f32, center_x: f32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.zoom(factor, center_x)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_pinch(
+        chart: *mut Chart,
+        scale: f32,
+        center_x: f32,
+        center_y: f32,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.pinch(scale, center_x, center_y)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_fit_content(chart: *mut Chart) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.fit_content()
     }
 }

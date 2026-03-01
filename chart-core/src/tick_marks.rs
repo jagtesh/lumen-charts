@@ -58,7 +58,7 @@ pub fn generate_price_ticks(scale: &PriceScale, plot_area: &Rect) -> Vec<TickMar
     ticks
 }
 
-/// Generate time tick marks (every Nth bar)
+/// Generate time tick marks (only for visible bars)
 pub fn generate_time_ticks(
     bars: &[OhlcBar],
     time_scale: &TimeScale,
@@ -68,28 +68,38 @@ pub fn generate_time_ticks(
         return vec![];
     }
 
-    // Aim for ~6-10 labels
+    let (first_vis, last_vis) = time_scale.visible_range(plot_area.width);
+    let visible_count = last_vis.saturating_sub(first_vis);
+    if visible_count == 0 {
+        return vec![];
+    }
+
+    // Aim for ~6-10 labels across the visible range
     let target_labels = 8;
-    let step = (bars.len() / target_labels).max(1);
+    let step = (visible_count / target_labels).max(1);
 
     let mut ticks = Vec::new();
-    let mut i = 0;
-    while i < bars.len() {
+    // Align to step boundary
+    let start = ((first_vis / step) * step).max(first_vis);
+    let mut i = start;
+    while i < last_vis && i < bars.len() {
         let x = time_scale.index_to_x(i, plot_area);
-        let ts = bars[i].time;
 
-        // Format as date
-        let label = if let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) {
-            dt.format("%b %d").to_string()
-        } else {
-            format!("{}", i)
-        };
+        // Only include ticks within the plot area
+        if x >= plot_area.x && x <= plot_area.x + plot_area.width {
+            let ts = bars[i].time;
+            let label = if let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) {
+                dt.format("%b %d").to_string()
+            } else {
+                format!("{}", i)
+            };
 
-        ticks.push(TickMark {
-            value: ts as f64,
-            label,
-            coord: x,
-        });
+            ticks.push(TickMark {
+                value: ts as f64,
+                label,
+                coord: x,
+            });
+        }
         i += step;
     }
     ticks
