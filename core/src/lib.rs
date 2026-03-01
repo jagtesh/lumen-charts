@@ -74,7 +74,7 @@ pub extern "C" fn chart_create(
     let state = ChartState::new(data, width as f32, height as f32, scale_factor);
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::METAL,
+        backends: wgpu::Backends::all(),
         ..Default::default()
     });
 
