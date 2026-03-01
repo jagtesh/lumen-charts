@@ -24,10 +24,10 @@ class ChartAPI {
         this.wasm = wasmModule;
     }
     addOhlcSeries(options) {
-        return new SeriesAPI(this.wasm, this.wasm.chart_add_ohlc_series, options);
+        return new SeriesAPI(this.wasm, this.wasm.chart_add_ohlc_series, options, 'ohlc');
     }
     addCandlestickSeries(options) {
-        return new SeriesAPI(this.wasm, this.wasm.chart_add_candlestick_series, options);
+        return new SeriesAPI(this.wasm, this.wasm.chart_add_candlestick_series, options, 'ohlc');
     }
     addLineSeries(options) {
         return new SeriesAPI(this.wasm, this.wasm.chart_add_line_series, options);
@@ -42,6 +42,50 @@ class ChartAPI {
         // Special case for base_value parameter
         const internalAdd = (data) => this.wasm.chart_add_baseline_series(data, baseValue || 0.0);
         return new SeriesAPI(this.wasm, internalAdd, options);
+    }
+
+    /**
+     * Set the primary series data (OHLC bars).
+     * Accepts an array of {time, open, high, low, close} objects.
+     */
+    setData(data) {
+        if (!Array.isArray(data)) {
+            throw new TypeError('chart.setData(): expected an array of {time, open, high, low, close} objects');
+        }
+        if (data.length > 0) {
+            const d = data[0];
+            if (d.time === undefined) throw new TypeError('chart.setData(): each item must have a "time" field');
+            if (d.open === undefined || d.high === undefined || d.low === undefined || d.close === undefined) {
+                throw new TypeError('chart.setData(): each item must have "open", "high", "low", "close" fields');
+            }
+            if (d.value !== undefined) {
+                console.warn('chart.setData(): "value" field is ignored for primary OHLC data — use addLineSeries().setData() for line data');
+            }
+        }
+        const flat = new Float64Array(data.length * 5);
+        for (let i = 0; i < data.length; i++) {
+            flat[i * 5] = data[i].time;
+            flat[i * 5 + 1] = data[i].open;
+            flat[i * 5 + 2] = data[i].high;
+            flat[i * 5 + 3] = data[i].low;
+            flat[i * 5 + 4] = data[i].close;
+        }
+        this.wasm.chart_set_data(flat);
+        this.wasm.chart_render_if_needed();
+    }
+
+    /**
+     * Change the rendering type of the primary series.
+     * type: 'ohlc' | 'candlestick' | 'line' | 'area' | 'histogram' | 'baseline'
+     */
+    setSeriesType(type) {
+        const typeMap = { 'ohlc': 0, 'candlestick': 1, 'line': 2, 'area': 3, 'histogram': 4, 'baseline': 5 };
+        const code = typeMap[type];
+        if (code === undefined) {
+            throw new Error(`chart.setSeriesType(): unknown type "${type}". Valid: ${Object.keys(typeMap).join(', ')}`);
+        }
+        this.wasm.chart_set_series_type(code);
+        this.wasm.chart_render_if_needed();
     }
 
     removeSeries(series) {
@@ -83,23 +127,33 @@ class PaneAPI {
 }
 
 class SeriesAPI {
-    constructor(wasmModule, wasmAddFn, options) {
+    constructor(wasmModule, wasmAddFn, options, seriesKind) {
         this.wasm = wasmModule;
         this.wasmAddFn = wasmAddFn;
-        this.id = null; // assigned when data is set currently due to WASM API design
-        // The current WASM API creates the series when data is passed,
-        // but we mimic LWC by returning a series object first
+        this.id = null;
         this.options = options;
+        this.seriesKind = seriesKind || 'line'; // 'ohlc' or 'line'
+        this._pendingPane = null; // deferred pane assignment
     }
 
     setData(data) {
-        // Convert JS array of objects to flattened Float64Array
-        // For line/area, we expect 2 numbers per point. For candles, 5. For histogram, 2 (+ colors handled in Rust).
+        if (!Array.isArray(data)) {
+            throw new TypeError('series.setData(): expected an array of data objects');
+        }
+
         let flatData;
 
         if (data.length > 0) {
-            if (data[0].open !== undefined) {
-                // OHLC / Candle
+            const d = data[0];
+            if (d.time === undefined) {
+                throw new TypeError('series.setData(): each item must have a "time" field');
+            }
+
+            if (this.seriesKind === 'ohlc') {
+                // OHLC / Candle series
+                if (d.open === undefined || d.high === undefined || d.low === undefined || d.close === undefined) {
+                    throw new TypeError('series.setData(): OHLC series requires "open", "high", "low", "close" fields');
+                }
                 flatData = new Float64Array(data.length * 5);
                 for (let i = 0; i < data.length; i++) {
                     flatData[i * 5] = data[i].time;
@@ -110,6 +164,14 @@ class SeriesAPI {
                 }
             } else {
                 // Line / Area / Histogram / Baseline
+                if (d.value === undefined) {
+                    if (d.close !== undefined) {
+                        console.warn('series.setData(): line/area/histogram series expects {time, value}. Using "close" as "value".');
+                        data = data.map(item => ({ time: item.time, value: item.close }));
+                    } else {
+                        throw new TypeError('series.setData(): each item must have a "value" field (or "close" for OHLC series)');
+                    }
+                }
                 flatData = new Float64Array(data.length * 2);
                 for (let i = 0; i < data.length; i++) {
                     flatData[i * 2] = data[i].time;
@@ -129,6 +191,13 @@ class SeriesAPI {
         if (this.options) {
             this.wasm.chart_series_apply_options(this.id, JSON.stringify(this.options));
         }
+
+        // Apply deferred pane assignment
+        if (this._pendingPane !== null) {
+            this.wasm.chart_series_move_to_pane(this.id, this._pendingPane.id);
+            this._pendingPane = null;
+        }
+
         this.wasm.chart_render_if_needed();
     }
 
@@ -145,6 +214,9 @@ class SeriesAPI {
         if (this.id !== null) {
             this.wasm.chart_series_move_to_pane(this.id, pane.id);
             this.wasm.chart_render_if_needed();
+        } else {
+            // Series not created yet — defer until setData() is called
+            this._pendingPane = pane;
         }
     }
 }

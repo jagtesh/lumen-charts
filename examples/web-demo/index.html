@@ -211,45 +211,11 @@
             return { macdLine, signalLine, histogram };
         }
 
-        function recreateMainSeries(type) {
-            if (mainSeries) {
-                chart.removeSeries(mainSeries);
-            }
-            const data = generateSampleData();
-
-            switch (type) {
-                case 'ohlc':
-                    mainSeries = chart.addOhlcSeries({});
-                    break;
-                case 'candle':
-                    mainSeries = chart.addCandlestickSeries({
-                        upColor: '#26a69a', downColor: '#ef5350',
-                        borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-                        wickUpColor: '#26a69a', wickDownColor: '#ef5350'
-                    });
-                    break;
-                case 'line':
-                    mainSeries = chart.addLineSeries({ color: '#2962FF', lineWidth: 2 });
-                    break;
-                case 'area':
-                    mainSeries = chart.addAreaSeries({
-                        topColor: 'rgba(41, 98, 255, 0.4)',
-                        bottomColor: 'rgba(41, 98, 255, 0.0)',
-                        lineColor: '#2962FF', lineWidth: 2
-                    });
-                    break;
-                case 'hist':
-                    mainSeries = chart.addHistogramSeries({ color: '#26a69a' });
-                    break;
-                case 'base':
-                    mainSeries = chart.addBaselineSeries({
-                        topLineColor: '#26a69a', topFillColor1: 'rgba(38, 166, 154, 0.28)', topFillColor2: 'rgba(38, 166, 154, 0.05)',
-                        bottomLineColor: '#ef5350', bottomFillColor1: 'rgba(239, 83, 80, 0.05)', bottomFillColor2: 'rgba(239, 83, 80, 0.28)'
-                    }, 185.0);
-                    break;
-            }
-            mainSeries.setData(data);
-        }
+        // Series type map (dropdown value -> API name)
+        const seriesTypeMap = {
+            'ohlc': 'ohlc', 'candle': 'candlestick', 'line': 'line',
+            'area': 'area', 'hist': 'histogram', 'base': 'baseline'
+        };
 
         async function run() {
             const status = document.getElementById('status');
@@ -263,7 +229,8 @@
                     grid: { vertLines: { color: "#333" }, horzLines: { color: "#333" } }
                 });
 
-                recreateMainSeries('ohlc');
+                // Load data ONCE via the primary series API (same as Swift)
+                chart.setData(generateSampleData());
                 chart.fitContent();
 
                 status.textContent = 'OHLC Bars • 100 bars from JS';
@@ -282,7 +249,8 @@
             };
 
             document.getElementById('sel-chart-type').addEventListener('change', (e) => {
-                recreateMainSeries(e.target.value);
+                // Just switch the rendering type — data stays the same (like Swift)
+                chart.setSeriesType(seriesTypeMap[e.target.value]);
                 status.textContent = `${typeNames[e.target.value]} • data from JS`;
             });
 
