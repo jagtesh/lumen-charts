@@ -3,6 +3,7 @@ pub mod chart_renderer;
 pub mod chart_state;
 pub mod price_scale;
 pub mod sample_data;
+pub mod text_render;
 pub mod tick_marks;
 pub mod time_scale;
 

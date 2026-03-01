@@ -8,6 +8,8 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 vello = "0.4"
+vello_encoding = "0.4"
+skrifa = "0.26"
 parley = "0.7"
 pollster = "0.4"
 chrono = { version = "0.4", features = ["serde"] }

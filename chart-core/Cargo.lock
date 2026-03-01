@@ -193,7 +193,9 @@ dependencies = [
  "log",
  "parley",
  "pollster",
+ "skrifa 0.26.6",
  "vello",
+ "vello_encoding",
 ]
 
 [[package]]

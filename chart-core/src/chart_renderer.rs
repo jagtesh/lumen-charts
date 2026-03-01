@@ -1,9 +1,10 @@
 use vello::kurbo::{Affine, Line, Rect as KurboRect, Stroke};
-use vello::peniko::Color;
+use vello::peniko::{Color, Font};
 use vello::Scene;
 
 use crate::chart_model::Rect;
 use crate::chart_state::ChartState;
+use crate::text_render::{chart_font, draw_text, measure_text};
 use crate::tick_marks::{generate_price_ticks, generate_time_ticks, TickMark};
 
 // Colors
@@ -14,6 +15,7 @@ const BULL_COLOR: Color = Color::new([0.15, 0.65, 0.60, 1.0]);
 const BEAR_COLOR: Color = Color::new([0.94, 0.33, 0.31, 1.0]);
 const TEXT_COLOR: Color = Color::new([0.6, 0.6, 0.7, 1.0]);
 const CROSSHAIR_COLOR: Color = Color::new([0.5, 0.5, 0.6, 0.8]);
+const LABEL_FONT_SIZE: f32 = 11.0;
 
 /// Render the entire chart from ChartState into a Vello Scene
 pub fn render_chart(scene: &mut Scene, state: &ChartState) {
@@ -22,6 +24,7 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
     }
 
     let layout = &state.layout;
+    let font = chart_font();
     let price_ticks = generate_price_ticks(&state.price_scale, &layout.plot_area);
     let time_ticks = generate_time_ticks(&state.data.bars, &state.time_scale, &layout.plot_area);
 
@@ -30,11 +33,11 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
     draw_background(scene, layout, t);
     draw_grid(scene, &price_ticks, &time_ticks, &layout.plot_area, t);
     draw_ohlc_bars(scene, state, t);
-    draw_y_axis(scene, &price_ticks, layout, t);
-    draw_x_axis(scene, &time_ticks, layout, t);
+    draw_y_axis(scene, &price_ticks, layout, &font, t);
+    draw_x_axis(scene, &time_ticks, layout, &font, t);
 
     if state.crosshair.visible {
-        draw_crosshair(scene, state, t);
+        draw_crosshair(scene, state, &font, t);
     }
 }
 
@@ -153,7 +156,7 @@ fn draw_ohlc_bars(scene: &mut Scene, state: &ChartState, t: Affine) {
     }
 }
 
-fn draw_crosshair(scene: &mut Scene, state: &ChartState, t: Affine) {
+fn draw_crosshair(scene: &mut Scene, state: &ChartState, font: &Font, t: Affine) {
     let plot = &state.layout.plot_area;
     let x = state.crosshair.x as f64;
     let y = state.crosshair.y as f64;
@@ -178,8 +181,9 @@ fn draw_crosshair(scene: &mut Scene, state: &ChartState, t: Affine) {
         &Line::new((plot.x as f64, y), ((plot.x + plot.width) as f64, y)),
     );
 
-    // Price label background on Y-axis
+    // Price label on Y-axis
     if let Some(price) = state.crosshair.price {
+        let label = format!("{:.2}", price);
         let label_x = (plot.x + plot.width + 2.0) as f64;
         let label_w = (state.layout.margins.right - 4.0) as f64;
         let label_h = 18.0;
@@ -193,10 +197,9 @@ fn draw_crosshair(scene: &mut Scene, state: &ChartState, t: Affine) {
             &KurboRect::new(label_x, label_y, label_x + label_w, label_y + label_h),
         );
 
-        // Price text (placeholder)
-        let label = format!("{:.2}", price);
-        draw_text_label(
+        draw_text(
             scene,
+            font,
             &label,
             label_x + 4.0,
             label_y + 13.0,
@@ -206,17 +209,17 @@ fn draw_crosshair(scene: &mut Scene, state: &ChartState, t: Affine) {
         );
     }
 
-    // Bar info label at top when hovering a bar
+    // OHLC info tooltip at top of chart
     if let Some(idx) = state.crosshair.bar_index {
         if idx < state.data.bars.len() {
             let bar = &state.data.bars[idx];
             let info = format!(
-                "O:{:.2} H:{:.2} L:{:.2} C:{:.2}",
+                "O:{:.2}  H:{:.2}  L:{:.2}  C:{:.2}",
                 bar.open, bar.high, bar.low, bar.close
             );
 
-            // Background
-            let info_w = info.len() as f64 * 6.5 + 12.0;
+            let text_width = measure_text(font, &info, 10.0);
+            let info_w = text_width as f64 + 16.0;
             let info_x = plot.x as f64 + 8.0;
             let info_y = plot.y as f64 + 4.0;
             scene.fill(
@@ -227,10 +230,11 @@ fn draw_crosshair(scene: &mut Scene, state: &ChartState, t: Affine) {
                 &KurboRect::new(info_x, info_y, info_x + info_w, info_y + 20.0),
             );
 
-            draw_text_label(
+            draw_text(
                 scene,
+                font,
                 &info,
-                info_x + 6.0,
+                info_x + 8.0,
                 info_y + 14.0,
                 10.0,
                 TEXT_COLOR,
@@ -244,6 +248,7 @@ fn draw_y_axis(
     scene: &mut Scene,
     price_ticks: &[TickMark],
     layout: &crate::chart_model::ChartLayout,
+    font: &Font,
     t: Affine,
 ) {
     let x_start = layout.plot_area.x + layout.plot_area.width + 5.0;
@@ -266,12 +271,13 @@ fn draw_y_axis(
             ),
         );
 
-        draw_text_label(
+        draw_text(
             scene,
+            font,
             &tick.label,
             x_start as f64,
             (tick.coord + 4.0) as f64,
-            11.0,
+            LABEL_FONT_SIZE,
             TEXT_COLOR,
             t,
         );
@@ -282,6 +288,7 @@ fn draw_x_axis(
     scene: &mut Scene,
     time_ticks: &[TickMark],
     layout: &crate::chart_model::ChartLayout,
+    font: &Font,
     t: Affine,
 ) {
     let y_start = layout.plot_area.y + layout.plot_area.height + 5.0;
@@ -304,65 +311,17 @@ fn draw_x_axis(
             ),
         );
 
-        let label_width = tick.label.len() as f64 * 6.0;
-        draw_text_label(
+        // Center the label under the tick mark
+        let label_width = measure_text(font, &tick.label, LABEL_FONT_SIZE);
+        draw_text(
             scene,
+            font,
             &tick.label,
-            tick.coord as f64 - label_width / 2.0,
+            tick.coord as f64 - label_width as f64 / 2.0,
             (y_start + 12.0) as f64,
-            11.0,
+            LABEL_FONT_SIZE,
             TEXT_COLOR,
             t,
         );
-    }
-}
-
-/// Simple placeholder text rendering (rectangles per character)
-fn draw_text_label(
-    scene: &mut Scene,
-    text: &str,
-    x: f64,
-    y: f64,
-    font_size: f64,
-    color: Color,
-    t: Affine,
-) {
-    let char_width = font_size * 0.6;
-    let char_height = font_size;
-
-    for (i, ch) in text.chars().enumerate() {
-        if ch == ' ' {
-            continue;
-        }
-        let cx = x + i as f64 * char_width;
-
-        match ch {
-            '0'..='9' | 'A'..='Z' | 'a'..='z' => {
-                let glyph_rect = KurboRect::new(
-                    cx + 1.0,
-                    y - char_height + 2.0,
-                    cx + char_width - 1.0,
-                    y - 1.0,
-                );
-                scene.fill(vello::peniko::Fill::NonZero, t, color, None, &glyph_rect);
-            }
-            '.' | ',' => {
-                let dot = KurboRect::new(cx + 2.0, y - 3.0, cx + 4.0, y - 1.0);
-                scene.fill(vello::peniko::Fill::NonZero, t, color, None, &dot);
-            }
-            '-' | ':' => {
-                scene.stroke(
-                    &Stroke::new(1.0),
-                    t,
-                    color,
-                    None,
-                    &Line::new(
-                        (cx + 1.0, y - char_height / 2.0),
-                        (cx + char_width - 1.0, y - char_height / 2.0),
-                    ),
-                );
-            }
-            _ => {}
-        }
     }
 }
