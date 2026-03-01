@@ -1,8 +1,7 @@
 use vello::kurbo::{Affine, BezPath, Line, Rect as KurboRect, Stroke};
-use vello::peniko::{Brush, Color, ColorStops, Font, Gradient};
+use vello::peniko::{Brush, Color, Font, Gradient};
 use vello::Scene;
 
-use crate::chart_model::Rect;
 use crate::chart_state::ChartState;
 use crate::overlays::{LineStyle, MarkerPosition, MarkerShape};
 use crate::series::{SeriesData, SeriesType};

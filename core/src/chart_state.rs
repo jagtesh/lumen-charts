@@ -1,5 +1,6 @@
 use crate::chart_model::{ChartData, ChartLayout, OhlcBar};
 use crate::chart_options::ChartOptions;
+use crate::invalidation::{InvalidateMask, InvalidationLevel};
 use crate::overlays::Overlays;
 use crate::price_scale::PriceScale;
 use crate::series::{SeriesCollection, SeriesType};
@@ -158,6 +159,9 @@ pub struct ChartState {
     /// Pending events from the last interaction call
     pub pending_events: InteractionEvents,
 
+    /// Pending invalidation mask — accumulated between renders
+    pub pending_mask: InvalidateMask,
+
     /// Counter for auto-incrementing pane IDs
     next_pane_id: u32,
 }
@@ -197,7 +201,8 @@ impl ChartState {
             y_axis_drag_start_range: None,
             x_axis_drag_start_spacing: None,
             pending_events: InteractionEvents::default(),
-            next_pane_id: 1, // pane 0 is already created
+            pending_mask: InvalidateMask::full(), // first render needs full paint
+            next_pane_id: 1,                      // pane 0 is already created
         };
         state.update_panes_layout();
         state
@@ -208,6 +213,7 @@ impl ChartState {
         self.layout = ChartLayout::new(width, height, scale_factor);
         self.update_panes_layout();
         self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Full);
     }
 
     /// Distributes total plot_area height among the panes based on stretch
@@ -358,6 +364,7 @@ impl ChartState {
         self.panes.push(pane);
         self.update_panes_layout();
         self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Full);
         id
     }
 
@@ -381,6 +388,7 @@ impl ChartState {
             }
             self.update_panes_layout();
             self.update_price_scale();
+            self.pending_mask.set_global(InvalidationLevel::Full);
             true
         } else {
             false
@@ -484,12 +492,17 @@ impl ChartState {
                     let delta_px = self.drag.last_x - x;
                     self.time_scale.scroll_by_pixels(delta_px);
                     self.update_price_scale();
+                    self.pending_mask.set_global(InvalidationLevel::Light);
+                } else {
+                    self.pending_mask.set_global(InvalidationLevel::Cursor);
                 }
                 let dx = x - self.drag.last_x;
                 let dy = y - self.drag.last_y;
                 self.drag.total_distance += (dx * dx + dy * dy).sqrt();
                 self.drag.last_x = x;
                 self.drag.last_y = y;
+            } else {
+                self.pending_mask.set_global(InvalidationLevel::Cursor);
             }
 
             self.pending_events.crosshair_move = Some(CrosshairMoveEvent {
@@ -521,6 +534,7 @@ impl ChartState {
                 }
                 _ => {}
             }
+            self.pending_mask.set_global(InvalidationLevel::Light);
             let dx = x - self.drag.last_x;
             let dy = y - self.drag.last_y;
             self.drag.total_distance += (dx * dx + dy * dy).sqrt();
@@ -533,6 +547,7 @@ impl ChartState {
             self.crosshair.price = None;
 
             if was_visible {
+                self.pending_mask.set_global(InvalidationLevel::Cursor);
                 self.pending_events.crosshair_move = Some(CrosshairMoveEvent {
                     x,
                     y,
@@ -713,6 +728,7 @@ impl ChartState {
         }
         self.time_scale.scroll_by_pixels(delta_x);
         self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Light);
         true
     }
 
@@ -722,6 +738,7 @@ impl ChartState {
         self.time_scale
             .zoom(factor, center_x, &self.layout.plot_area);
         self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Light);
         true
     }
 
@@ -734,6 +751,7 @@ impl ChartState {
     pub fn fit_content(&mut self) -> bool {
         self.time_scale.fit_content(self.layout.plot_area.width);
         self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Light);
         true
     }
 
@@ -744,11 +762,13 @@ impl ChartState {
             ChartKey::ArrowLeft => {
                 self.time_scale.scroll_by_pixels(-scroll_amount);
                 self.update_price_scale();
+                self.pending_mask.set_global(InvalidationLevel::Light);
                 true
             }
             ChartKey::ArrowRight => {
                 self.time_scale.scroll_by_pixels(scroll_amount);
                 self.update_price_scale();
+                self.pending_mask.set_global(InvalidationLevel::Light);
                 true
             }
             ChartKey::ArrowUp | ChartKey::Plus => {
@@ -764,6 +784,7 @@ impl ChartState {
                 // Scroll to the rightmost data (most recent)
                 self.time_scale.scroll_offset = 0.0;
                 self.update_price_scale();
+                self.pending_mask.set_global(InvalidationLevel::Light);
                 true
             }
             ChartKey::Unknown => false,
@@ -809,6 +830,7 @@ impl ChartState {
         self.data.bars.sort_by_key(|b| b.time);
         self.time_scale = TimeScale::new(self.data.bars.len(), self.layout.plot_area.width);
         self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Light);
     }
 
     /// Update or append a single bar (by timestamp).
@@ -825,6 +847,7 @@ impl ChartState {
             }
         }
         self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Light);
     }
 
     /// Remove and return the last (most recent) bar.
@@ -847,7 +870,21 @@ impl ChartState {
     /// Apply new chart options. Returns true (always needs redraw).
     pub fn apply_options(&mut self, options: ChartOptions) -> bool {
         self.options = options;
+        self.pending_mask.set_global(InvalidationLevel::Full);
         true
+    }
+
+    /// Consume the pending invalidation mask, returning it and resetting to None.
+    /// Call this after rendering to clear the pending state.
+    pub fn consume_mask(&mut self) -> InvalidateMask {
+        let mask = self.pending_mask.clone();
+        self.pending_mask.reset();
+        mask
+    }
+
+    /// Get the current invalidation level without consuming it.
+    pub fn invalidation_level(&self) -> InvalidationLevel {
+        self.pending_mask.global_level()
     }
 
     /// Get a reference to current options.
@@ -1588,5 +1625,137 @@ mod tests {
         state.swap_panes(p1, p2);
         // Series should now be at index 2 (where p1 moved to)
         assert_eq!(state.series.get(series_id).unwrap().pane_index, 2);
+    }
+
+    // ---- Invalidation level from interactions ----
+
+    use crate::invalidation::InvalidationLevel;
+
+    #[test]
+    fn test_pointer_move_produces_cursor_level() {
+        let mut state = make_state();
+        state.consume_mask(); // clear initial Full
+        let cx = state.layout.plot_area.x + 100.0;
+        let cy = state.layout.plot_area.y + 100.0;
+        state.pointer_move(cx, cy);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Cursor);
+    }
+
+    #[test]
+    fn test_drag_produces_light_level() {
+        let mut state = make_state();
+        state.consume_mask();
+        let cx = state.layout.plot_area.x + 100.0;
+        let cy = state.layout.plot_area.y + 100.0;
+        // Start drag
+        state.pointer_down(cx, cy, 0);
+        state.consume_mask();
+        // Move while dragging — this is a pan
+        state.pointer_move(cx + 50.0, cy);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Light);
+    }
+
+    #[test]
+    fn test_scroll_produces_light_level() {
+        let mut state = make_state();
+        state.consume_mask();
+        state.scroll(10.0, 0.0);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Light);
+    }
+
+    #[test]
+    fn test_zoom_produces_light_level() {
+        let mut state = make_state();
+        state.consume_mask();
+        state.zoom(1.2, 400.0);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Light);
+    }
+
+    #[test]
+    fn test_resize_produces_full_level() {
+        let mut state = make_state();
+        state.consume_mask();
+        state.resize(1024.0, 768.0, 2.0);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Full);
+    }
+
+    #[test]
+    fn test_add_pane_produces_full_level() {
+        let mut state = make_state();
+        state.consume_mask();
+        state.add_pane(1.0);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Full);
+    }
+
+    #[test]
+    fn test_remove_pane_produces_full_level() {
+        let mut state = make_state();
+        let pane_id = state.add_pane(1.0);
+        state.consume_mask();
+        state.remove_pane(pane_id);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Full);
+    }
+
+    #[test]
+    fn test_set_data_produces_light_level() {
+        let mut state = make_state();
+        state.consume_mask();
+        state.set_data(vec![crate::chart_model::OhlcBar {
+            time: 1,
+            open: 100.0,
+            high: 110.0,
+            low: 90.0,
+            close: 105.0,
+        }]);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Light);
+    }
+
+    #[test]
+    fn test_apply_options_produces_full_level() {
+        let mut state = make_state();
+        state.consume_mask();
+        state.apply_options(ChartOptions::default());
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Full);
+    }
+
+    #[test]
+    fn test_consume_mask_resets_to_none() {
+        let mut state = make_state();
+        // Initial state has Full from construction
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Full);
+        let mask = state.consume_mask();
+        assert_eq!(mask.global_level(), InvalidationLevel::Full);
+        // After consume, should be None
+        assert_eq!(state.invalidation_level(), InvalidationLevel::None);
+    }
+
+    #[test]
+    fn test_mask_coalesces_cursor_then_light() {
+        let mut state = make_state();
+        state.consume_mask();
+        // Mouse move → Cursor
+        let cx = state.layout.plot_area.x + 100.0;
+        let cy = state.layout.plot_area.y + 100.0;
+        state.pointer_move(cx, cy);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Cursor);
+        // Scroll → Light (should upgrade from Cursor)
+        state.scroll(5.0, 0.0);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Light);
+    }
+
+    #[test]
+    fn test_fit_content_produces_light_level() {
+        let mut state = make_state();
+        state.consume_mask();
+        state.fit_content();
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Light);
+    }
+
+    #[test]
+    fn test_key_down_arrow_produces_light_level() {
+        let mut state = make_state();
+        state.consume_mask();
+        state.key_down(ChartKey::ArrowLeft);
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Light);
     }
 }

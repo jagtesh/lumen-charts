@@ -3,6 +3,7 @@ pub mod chart_options;
 pub mod chart_renderer;
 pub mod chart_state;
 pub mod data_layer;
+pub mod invalidation;
 pub mod overlays;
 pub mod price_scale;
 pub mod sample_data;
@@ -150,6 +151,13 @@ mod native {
             assert!(!chart.is_null());
             &mut *chart
         };
+
+        // Consume the pending invalidation mask
+        let mask = chart.state.consume_mask();
+        if !mask.needs_redraw() {
+            // Nothing changed since last render — skip entirely
+            return;
+        }
 
         chart.scene.reset();
         render_chart(&mut chart.scene, &chart.state);

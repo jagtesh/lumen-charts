@@ -70,7 +70,7 @@ pub fn draw_text(
 }
 
 /// Measure the width of a text string (in logical pixels).
-pub fn measure_text(font: &Font, text: &str, font_size: f32) -> f32 {
+pub fn measure_text(_font: &Font, text: &str, font_size: f32) -> f32 {
     if text.is_empty() {
         return 0.0;
     }
