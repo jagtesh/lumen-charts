@@ -67,6 +67,7 @@
 
     <script type="module">
         import init, {
+            chart_start,
             chart_pointer_move,
             chart_pointer_down,
             chart_pointer_up,
@@ -125,6 +126,7 @@
             try {
                 status.textContent = '⏳ Loading WASM module...';
                 await init();
+                await chart_start();
 
                 // Load sample data from JS
                 const data = generateSampleData();
@@ -259,7 +261,7 @@
             // Focus the container for keyboard events
             container.focus();
 
-            // Frame tick for dbl-click timing
+            // Frame tick for render/animations
             function frameTick() {
                 chart_tick();
                 requestAnimationFrame(frameTick);

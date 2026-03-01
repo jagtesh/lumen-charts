@@ -24,8 +24,8 @@ fn ptr() -> *mut Chart {
     }
 }
 
-#[wasm_bindgen(start)]
-pub async fn main() {
+#[wasm_bindgen]
+pub async fn chart_start() {
     console_error_panic_hook::set_once();
     console_log::init_with_level(log::Level::Info).ok();
 
@@ -189,7 +189,7 @@ pub fn chart_touch_start(id: u32, x: f32, y: f32) -> bool { lumen_charts::chart_
 pub fn chart_touch_move(id: u32, x: f32, y: f32) -> bool { lumen_charts::chart_touch_move(ptr(), id, x, y) }
 
 #[wasm_bindgen]
-pub fn chart_touch_end(id: u32) -> bool { lumen_charts::chart_touch_end(ptr(), id) }
+pub fn chart_touch_end(id: u32) -> bool { lumen_charts::chart_touch_end(ptr(), id) != 0 }
 
 #[wasm_bindgen]
 pub fn chart_touch_tick() { lumen_charts::chart_touch_tick(ptr()); }
@@ -292,7 +292,7 @@ pub fn chart_time_to_coordinate(time: f64) -> f32 { lumen_charts::chart_time_to_
 // === ITimeScaleApi ===
 
 #[wasm_bindgen]
-pub fn chart_time_scale_scroll_to_position(pos: f32) { lumen_charts::chart_time_scale_scroll_to_position(ptr(), pos, false); }
+pub fn chart_time_scale_scroll_to_position(pos: f32) { lumen_charts::chart_time_scale_scroll_to_position(ptr(), pos); }
 
 #[wasm_bindgen]
 pub fn chart_time_scale_scroll_to_real_time() { lumen_charts::chart_time_scale_scroll_to_real_time(ptr()); }
@@ -309,10 +309,10 @@ pub fn chart_time_scale_height() -> f32 { lumen_charts::chart_time_scale_height(
 // === IPriceScaleApi ===
 
 #[wasm_bindgen]
-pub fn chart_price_scale_get_mode() -> u32 { lumen_charts::chart_price_scale_get_mode(ptr()) }
+pub fn chart_price_scale_get_mode() -> u32 { lumen_charts::chart_price_scale_get_mode(ptr(), 0) as u32 }
 
 #[wasm_bindgen]
-pub fn chart_price_scale_set_mode(mode: u32) { lumen_charts::chart_price_scale_set_mode(ptr(), mode); }
+pub fn chart_price_scale_set_mode(mode: u32) { lumen_charts::chart_price_scale_set_mode(ptr(), 0, mode as u8); }
 
 // === Resize ===
 
