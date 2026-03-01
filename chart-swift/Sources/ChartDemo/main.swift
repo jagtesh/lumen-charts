@@ -23,7 +23,7 @@ class ChartView: NSView {
     override func makeBackingLayer() -> CALayer {
         metalLayer = CAMetalLayer()
         metalLayer.device = MTLCreateSystemDefaultDevice()
-        metalLayer.pixelFormat = .bgra8Unorm_srgb
+        metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
         metalLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
         return metalLayer

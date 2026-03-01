@@ -83,10 +83,12 @@ pub extern "C" fn chart_create(
 
     // Configure surface
     let surface_caps = surface.get_capabilities(&adapter);
+    // Vello handles sRGB conversion internally — it rejects sRGB surface formats.
+    // Use a non-sRGB format (prefer Bgra8Unorm which matches CAMetalLayer default).
     let format = surface_caps
         .formats
         .iter()
-        .find(|f| f.is_srgb())
+        .find(|f| !f.is_srgb())
         .copied()
         .unwrap_or(surface_caps.formats[0]);
 
