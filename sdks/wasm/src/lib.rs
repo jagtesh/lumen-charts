@@ -151,8 +151,42 @@ pub async fn main() {
     )
     .expect("Failed to create Vello renderer");
 
-    // Start with empty data — host JS calls chart_set_data() to load bars
-    let data = ChartData { bars: Vec::new() };
+    // Generate sample data for testing (same LCG as Swift demo)
+    let mut bars = Vec::with_capacity(100);
+    let base_time: i64 = 1704153600; // 2024-01-02 UTC
+    let day: i64 = 86400;
+    let mut price: f64 = 185.0;
+    let mut rng: u64 = 42;
+
+    for i in 0..100 {
+        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let r1 = (rng >> 33) as f64 / (1u64 << 31) as f64 * 2.0 - 1.0;
+        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let r2 = (rng >> 33) as f64 / (1u64 << 31) as f64 * 2.0 - 1.0;
+        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let r3 = (rng >> 33) as f64 / (1u64 << 31) as f64 * 2.0 - 1.0;
+
+        let change_pct = r1 * 0.02;
+        let daily_range = price * (0.005 + r2.abs() * 0.015);
+        let open = price;
+        let close = price * (1.0 + change_pct);
+        let high = open.max(close) + daily_range * r3.abs();
+        let low = open.min(close) - daily_range * r2.abs();
+
+        bars.push(lumen_charts::chart_model::OhlcBar {
+            time: base_time + i * day,
+            open,
+            high: high.max(open.max(close)),
+            low: low.min(open.min(close)),
+            close,
+        });
+        price = close;
+    }
+
+    log::info!("Generated {} sample bars, first price: {:.2}", bars.len(), bars[0].open);
+
+    // Start with sample data
+    let data = ChartData { bars };
     let state = ChartState::new(data, width as f32, height as f32, scale_factor);
 
     let mut chart = WasmChart {
@@ -164,6 +198,9 @@ pub async fn main() {
         surface_config,
         vello_renderer,
     };
+
+    // Fit content then render
+    chart.state.fit_content();
 
     // Initial render
     chart.render();
@@ -248,7 +285,18 @@ pub fn chart_set_data(data: &[f64]) {
         .collect();
 
     with_chart(|chart| {
+        log::info!("chart_set_data: {} bars parsed", bars.len());
+        if let Some(first) = bars.first() {
+            log::info!("  first bar: time={} o={:.2} h={:.2} l={:.2} c={:.2}", first.time, first.open, first.high, first.low, first.close);
+        }
         chart.state.set_data(bars);
+        log::info!("  after set_data: {} bars in state, plot_area=({:.0}x{:.0})",
+            chart.state.bar_count(),
+            chart.state.layout.plot_area.width,
+            chart.state.layout.plot_area.height);
+        log::info!("  price_scale min={:.2} max={:.2}",
+            chart.state.panes[0].price_scale.min_price,
+            chart.state.panes[0].price_scale.max_price);
         true
     });
 }
