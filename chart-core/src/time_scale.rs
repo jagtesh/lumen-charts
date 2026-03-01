@@ -37,6 +37,10 @@ impl TimeScale {
     }
 
     /// Index of the first visible bar (may be fractional/negative)
+    ///
+    /// Relationship: `first = bar_count - visible + scroll_offset`
+    /// Inverse:      `scroll_offset = first - bar_count + visible`
+    /// Use `scroll_offset_for_first()` when computing the inverse.
     pub fn first_visible_index(&self, plot_width: f32) -> f32 {
         let visible = self.visible_bar_count(plot_width);
         self.bar_count as f32 - visible + self.scroll_offset
@@ -45,6 +49,13 @@ impl TimeScale {
     /// Index of the last visible bar
     pub fn last_visible_index(&self, _plot_width: f32) -> f32 {
         self.bar_count as f32 + self.scroll_offset
+    }
+
+    /// Compute the scroll_offset that would place `first` as the first visible index.
+    /// This is the inverse of `first_visible_index()`.
+    fn scroll_offset_for_first(&self, first: f32, plot_width: f32) -> f32 {
+        let visible = plot_width / self.bar_spacing;
+        first - self.bar_count as f32 + visible
     }
 
     /// Convert bar index to center x pixel coordinate within the plot area
@@ -69,12 +80,10 @@ impl TimeScale {
         }
     }
 
-    /// Scroll by a number of bars (positive = scroll right / see older data)
+    /// Scroll by a number of bars (negative = see older data, positive = see newer)
     pub fn scroll_by(&mut self, delta_bars: f32) {
         self.scroll_offset += delta_bars;
-        // Clamp: can't scroll past the first bar, and only a bit past the last
-        let max_scroll = (self.bar_count as f32).max(0.0);
-        self.scroll_offset = self.scroll_offset.clamp(-10.0, max_scroll);
+        self.clamp_scroll();
     }
 
     /// Scroll by pixels (converts to bar units)
@@ -98,10 +107,14 @@ impl TimeScale {
 
         // Recalculate scroll offset to keep center_index at center_x
         let new_first = center_index - (center_x - plot_area.x) / new_spacing + 0.5;
-        let new_visible = plot_area.width / new_spacing;
-        self.scroll_offset = self.bar_count as f32 - new_visible - new_first;
-        let max_scroll = (self.bar_count as f32).max(0.0);
-        self.scroll_offset = self.scroll_offset.clamp(-10.0, max_scroll);
+        self.scroll_offset = self.scroll_offset_for_first(new_first, plot_area.width);
+        self.clamp_scroll();
+    }
+
+    fn clamp_scroll(&mut self) {
+        // Negative = scrolled into history, positive = past the end
+        let max_history = (self.bar_count as f32).max(0.0);
+        self.scroll_offset = self.scroll_offset.clamp(-max_history, 10.0);
     }
 
     /// Fit all bars into the visible area
@@ -171,11 +184,11 @@ mod tests {
     #[test]
     fn test_scroll_clamped() {
         let mut ts = TimeScale::new(100, 800.0);
-        ts.scroll_by(1000.0);
-        assert!(ts.scroll_offset <= 100.0);
-
         ts.scroll_by(-2000.0);
-        assert!(ts.scroll_offset >= -10.0);
+        assert!(ts.scroll_offset >= -100.0);
+
+        ts.scroll_by(3000.0);
+        assert!(ts.scroll_offset <= 10.0);
     }
 
     #[test]
@@ -210,6 +223,51 @@ mod tests {
         // Zoom way out
         ts.zoom(0.01, area.x + area.width / 2.0, &area);
         assert!(ts.bar_spacing >= ts.min_bar_spacing);
+    }
+
+    #[test]
+    fn test_zoom_stability() {
+        // Zooming in then out by the same factor should return to roughly the same state
+        let mut ts = TimeScale::new(100, 800.0);
+        let area = make_plot_area(800.0);
+        let center = area.x + area.width / 2.0;
+        let orig_spacing = ts.bar_spacing;
+        let orig_offset = ts.scroll_offset;
+
+        ts.zoom(1.5, center, &area);
+        ts.zoom(1.0 / 1.5, center, &area);
+
+        assert!(
+            (ts.bar_spacing - orig_spacing).abs() < 0.1,
+            "spacing: {} vs {}",
+            ts.bar_spacing,
+            orig_spacing
+        );
+        assert!(
+            (ts.scroll_offset - orig_offset).abs() < 1.0,
+            "offset: {} vs {}",
+            ts.scroll_offset,
+            orig_offset
+        );
+    }
+
+    #[test]
+    fn test_zoom_center_pinned() {
+        // The bar under the center point should stay at the same x position after zoom
+        let mut ts = TimeScale::new(100, 800.0);
+        let area = make_plot_area(800.0);
+        let center = area.x + 300.0;
+
+        let idx_before = ts.x_to_index(center, &area);
+        ts.zoom(2.0, center, &area);
+        let x_after = ts.index_to_x(idx_before.round() as usize, &area);
+
+        assert!(
+            (x_after - center).abs() < ts.bar_spacing,
+            "center shifted: {} vs {}",
+            x_after,
+            center
+        );
     }
 
     #[test]
