@@ -132,6 +132,78 @@ impl PaneState {
     }
 }
 
+/// A single touch point from the platform layer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TouchPoint {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// What gesture the touch system has recognized.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TouchGesture {
+    /// No gesture yet (too early to tell)
+    None,
+    /// Single-finger pan
+    Pan,
+    /// Two-finger pinch/zoom
+    Pinch,
+    /// Quick tap (touch down + up within distance threshold)
+    Tap,
+    /// Long press (held without moving)
+    LongPress,
+}
+
+/// Internal state for touch gesture recognition.
+#[derive(Debug, Clone)]
+pub struct TouchState {
+    /// Currently active touch points (max 2 for pinch)
+    pub touches: Vec<TouchPoint>,
+    /// What gesture has been recognized
+    pub gesture: TouchGesture,
+    /// Accumulated distance for the first finger (for tap vs drag detection)
+    pub total_distance: f32,
+    /// Last known pinch distance (for delta calculation)
+    pub last_pinch_distance: f32,
+    /// Center X of the pinch gesture
+    pub pinch_center_x: f32,
+    /// Frame counter since first touch down (for long-press detection)
+    pub frames_since_down: u32,
+}
+
+impl Default for TouchState {
+    fn default() -> Self {
+        Self {
+            touches: Vec::new(),
+            gesture: TouchGesture::None,
+            total_distance: 0.0,
+            last_pinch_distance: 0.0,
+            pinch_center_x: 0.0,
+            frames_since_down: 0,
+        }
+    }
+}
+
+impl TouchState {
+    /// Distance between two touch points
+    fn pinch_distance(a: &TouchPoint, b: &TouchPoint) -> f32 {
+        let dx = a.x - b.x;
+        let dy = a.y - b.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    /// Center between two touch points
+    fn pinch_center(a: &TouchPoint, b: &TouchPoint) -> (f32, f32) {
+        ((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
+    }
+}
+
+/// Distance threshold for tap detection (pixels)
+const TOUCH_TAP_THRESHOLD: f32 = 10.0;
+/// Frame threshold for long-press (frames at 60fps, ~500ms)
+const LONG_PRESS_FRAMES: u32 = 30;
+
 /// Full mutable chart state — owns the model+view state
 pub struct ChartState {
     pub data: ChartData,
@@ -172,6 +244,9 @@ pub struct ChartState {
     pub crosshair_render_count: u64,
     /// Number of renders skipped due to None mask
     pub skipped_render_count: u64,
+
+    /// Touch gesture state
+    pub touch: TouchState,
 }
 
 impl ChartState {
@@ -214,6 +289,7 @@ impl ChartState {
             bottom_render_count: 0,
             crosshair_render_count: 0,
             skipped_render_count: 0,
+            touch: TouchState::default(),
         };
         state.update_panes_layout();
         state
@@ -830,6 +906,127 @@ impl ChartState {
             let new_spacing = (orig_spacing * factor).clamp(2.0, 50.0);
             self.time_scale.bar_spacing = new_spacing;
             self.update_price_scale();
+        }
+    }
+
+    // --- Touch event handling ---
+
+    /// A touch point started (finger down).
+    /// Returns true if the state needs redrawing.
+    pub fn touch_start(&mut self, point: TouchPoint) -> bool {
+        if self.touch.touches.len() >= 2 {
+            return false; // max 2 fingers
+        }
+        self.touch.touches.push(point);
+        let count = self.touch.touches.len();
+
+        if count == 1 {
+            // First finger — start tracking for pan/tap/long-press
+            self.touch.gesture = TouchGesture::None;
+            self.touch.total_distance = 0.0;
+            self.touch.frames_since_down = 0;
+        } else if count == 2 {
+            // Second finger — transition to pinch
+            self.touch.gesture = TouchGesture::Pinch;
+            let d = TouchState::pinch_distance(&self.touch.touches[0], &self.touch.touches[1]);
+            let (cx, _cy) =
+                TouchState::pinch_center(&self.touch.touches[0], &self.touch.touches[1]);
+            self.touch.last_pinch_distance = d;
+            self.touch.pinch_center_x = cx;
+        }
+
+        false // No visual change yet
+    }
+
+    /// A touch point moved (finger dragged).
+    /// Returns true if the state needs redrawing.
+    pub fn touch_move(&mut self, point: TouchPoint) -> bool {
+        // Find and update this touch point
+        let idx = self.touch.touches.iter().position(|t| t.id == point.id);
+        let idx = match idx {
+            Some(i) => i,
+            None => return false,
+        };
+
+        let old = self.touch.touches[idx];
+        let dx = point.x - old.x;
+        let dy = point.y - old.y;
+        self.touch.total_distance += (dx * dx + dy * dy).sqrt();
+        self.touch.touches[idx] = point;
+
+        match self.touch.touches.len() {
+            1 => {
+                // Single finger — recognize pan if moved enough
+                if self.touch.total_distance > TOUCH_TAP_THRESHOLD {
+                    self.touch.gesture = TouchGesture::Pan;
+                }
+
+                if self.touch.gesture == TouchGesture::Pan {
+                    // Pan the chart: delta_x moves as scroll
+                    self.time_scale.scroll_by_pixels(-dx);
+                    self.update_price_scale();
+                    self.pending_mask.set_global(InvalidationLevel::Light);
+                    return true;
+                }
+                false
+            }
+            2 => {
+                // Two fingers — pinch zoom
+                self.touch.gesture = TouchGesture::Pinch;
+                let d = TouchState::pinch_distance(&self.touch.touches[0], &self.touch.touches[1]);
+                let (cx, _cy) =
+                    TouchState::pinch_center(&self.touch.touches[0], &self.touch.touches[1]);
+
+                if self.touch.last_pinch_distance > 0.0 {
+                    let scale = d / self.touch.last_pinch_distance;
+                    if (scale - 1.0).abs() > 0.001 {
+                        self.pinch(scale, cx, 0.0);
+                        // pinch already sets Light mask
+                    }
+                }
+
+                self.touch.last_pinch_distance = d;
+                self.touch.pinch_center_x = cx;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// A touch point ended (finger up).
+    /// Returns the recognized gesture for the caller to react to.
+    pub fn touch_end(&mut self, point_id: u32) -> TouchGesture {
+        let idx = self.touch.touches.iter().position(|t| t.id == point_id);
+        if let Some(idx) = idx {
+            self.touch.touches.remove(idx);
+        }
+
+        if self.touch.touches.is_empty() {
+            // All fingers up — finalize gesture
+            let gesture = if self.touch.total_distance < TOUCH_TAP_THRESHOLD {
+                if self.touch.frames_since_down >= LONG_PRESS_FRAMES {
+                    TouchGesture::LongPress
+                } else {
+                    TouchGesture::Tap
+                }
+            } else {
+                self.touch.gesture
+            };
+            self.touch.gesture = TouchGesture::None;
+            gesture
+        } else {
+            // Still have fingers down — might transition back to pan
+            if self.touch.touches.len() == 1 {
+                self.touch.gesture = TouchGesture::Pan;
+            }
+            self.touch.gesture
+        }
+    }
+
+    /// Called each frame to advance touch timers (for long-press detection).
+    pub fn touch_tick(&mut self) {
+        if !self.touch.touches.is_empty() {
+            self.touch.frames_since_down += 1;
         }
     }
 
@@ -1768,5 +1965,192 @@ mod tests {
         state.consume_mask();
         state.key_down(ChartKey::ArrowLeft);
         assert_eq!(state.invalidation_level(), InvalidationLevel::Light);
+    }
+
+    // ---- Touch event tests ----
+
+    #[test]
+    fn test_touch_tap_recognized() {
+        let mut state = make_state();
+        state.touch_start(TouchPoint {
+            id: 1,
+            x: 400.0,
+            y: 250.0,
+        });
+        let gesture = state.touch_end(1);
+        assert_eq!(gesture, TouchGesture::Tap);
+    }
+
+    #[test]
+    fn test_touch_long_press_recognized() {
+        let mut state = make_state();
+        state.touch_start(TouchPoint {
+            id: 1,
+            x: 400.0,
+            y: 250.0,
+        });
+        // Simulate holding for 30+ frames without moving
+        for _ in 0..35 {
+            state.touch_tick();
+        }
+        let gesture = state.touch_end(1);
+        assert_eq!(gesture, TouchGesture::LongPress);
+    }
+
+    #[test]
+    fn test_touch_pan_recognized() {
+        let mut state = make_state();
+        state.touch_start(TouchPoint {
+            id: 1,
+            x: 400.0,
+            y: 250.0,
+        });
+        // Move beyond tap threshold
+        state.touch_move(TouchPoint {
+            id: 1,
+            x: 430.0,
+            y: 250.0,
+        });
+        assert_eq!(state.touch.gesture, TouchGesture::Pan);
+        let gesture = state.touch_end(1);
+        assert_eq!(gesture, TouchGesture::Pan);
+    }
+
+    #[test]
+    fn test_touch_pan_scrolls_chart() {
+        let mut state = make_state();
+        state.consume_mask();
+        let offset_before = state.time_scale.scroll_offset;
+        state.touch_start(TouchPoint {
+            id: 1,
+            x: 400.0,
+            y: 250.0,
+        });
+        // Move right (should scroll chart left = see newer data)
+        state.touch_move(TouchPoint {
+            id: 1,
+            x: 430.0,
+            y: 250.0,
+        });
+        state.touch_move(TouchPoint {
+            id: 1,
+            x: 460.0,
+            y: 250.0,
+        });
+        let offset_after = state.time_scale.scroll_offset;
+        assert_ne!(
+            offset_before, offset_after,
+            "scroll offset should have changed"
+        );
+    }
+
+    #[test]
+    fn test_touch_pan_produces_light_level() {
+        let mut state = make_state();
+        state.consume_mask();
+        state.touch_start(TouchPoint {
+            id: 1,
+            x: 400.0,
+            y: 250.0,
+        });
+        state.touch_move(TouchPoint {
+            id: 1,
+            x: 430.0,
+            y: 250.0,
+        });
+        assert_eq!(state.invalidation_level(), InvalidationLevel::Light);
+    }
+
+    #[test]
+    fn test_touch_pinch_recognized() {
+        let mut state = make_state();
+        state.touch_start(TouchPoint {
+            id: 1,
+            x: 300.0,
+            y: 250.0,
+        });
+        state.touch_start(TouchPoint {
+            id: 2,
+            x: 500.0,
+            y: 250.0,
+        });
+        assert_eq!(state.touch.gesture, TouchGesture::Pinch);
+    }
+
+    #[test]
+    fn test_touch_pinch_zooms_chart() {
+        let mut state = make_state();
+        let spacing_before = state.time_scale.bar_spacing;
+        state.touch_start(TouchPoint {
+            id: 1,
+            x: 300.0,
+            y: 250.0,
+        });
+        state.touch_start(TouchPoint {
+            id: 2,
+            x: 500.0,
+            y: 250.0,
+        });
+        // Move fingers apart (zoom in)
+        state.touch_move(TouchPoint {
+            id: 1,
+            x: 250.0,
+            y: 250.0,
+        });
+        state.touch_move(TouchPoint {
+            id: 2,
+            x: 550.0,
+            y: 250.0,
+        });
+        let spacing_after = state.time_scale.bar_spacing;
+        assert!(
+            spacing_after > spacing_before,
+            "pinch apart should zoom in (wider bars)"
+        );
+    }
+
+    #[test]
+    fn test_touch_pinch_to_pan_transition() {
+        let mut state = make_state();
+        state.touch_start(TouchPoint {
+            id: 1,
+            x: 300.0,
+            y: 250.0,
+        });
+        state.touch_start(TouchPoint {
+            id: 2,
+            x: 500.0,
+            y: 250.0,
+        });
+        assert_eq!(state.touch.gesture, TouchGesture::Pinch);
+        // Lift one finger → should transition to Pan
+        state.touch_end(2);
+        // touches.len() == 1, gesture should be Pan
+        assert_eq!(state.touch.gesture, TouchGesture::Pan);
+    }
+
+    #[test]
+    fn test_touch_tick_advances_counter() {
+        let mut state = make_state();
+        assert_eq!(state.touch.frames_since_down, 0);
+        state.touch_start(TouchPoint {
+            id: 1,
+            x: 400.0,
+            y: 250.0,
+        });
+        state.touch_tick();
+        state.touch_tick();
+        assert_eq!(state.touch.frames_since_down, 2);
+    }
+
+    #[test]
+    fn test_touch_tick_no_op_when_no_touches() {
+        let mut state = make_state();
+        state.touch_tick();
+        state.touch_tick();
+        assert_eq!(
+            state.touch.frames_since_down, 0,
+            "should not advance when no touches"
+        );
     }
 }

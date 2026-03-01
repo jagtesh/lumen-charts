@@ -7,6 +7,7 @@ pub mod invalidation;
 pub mod overlays;
 pub mod price_scale;
 pub mod sample_data;
+pub mod scale;
 pub mod series;
 pub mod text_render;
 pub mod tick_marks;
@@ -22,7 +23,6 @@ mod native {
     use crate::chart_model::ChartData;
     use crate::chart_renderer::{render_bottom_scene, render_crosshair_scene};
     use crate::chart_state::ChartState;
-    
 
     use vello::wgpu;
     use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
@@ -417,6 +417,58 @@ mod native {
             &mut *chart
         };
         chart.dbl_click_cb = None;
+    }
+
+    // ----- Touch events -----
+
+    #[no_mangle]
+    pub extern "C" fn chart_touch_start(chart: *mut Chart, id: u32, x: f32, y: f32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart
+            .state
+            .touch_start(crate::chart_state::TouchPoint { id, x, y })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_touch_move(chart: *mut Chart, id: u32, x: f32, y: f32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart
+            .state
+            .touch_move(crate::chart_state::TouchPoint { id, x, y })
+    }
+
+    /// Returns the recognized gesture as a u8:
+    /// 0 = None, 1 = Pan, 2 = Pinch, 3 = Tap, 4 = LongPress
+    #[no_mangle]
+    pub extern "C" fn chart_touch_end(chart: *mut Chart, id: u32) -> u8 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let gesture = chart.state.touch_end(id);
+        match gesture {
+            crate::chart_state::TouchGesture::None => 0,
+            crate::chart_state::TouchGesture::Pan => 1,
+            crate::chart_state::TouchGesture::Pinch => 2,
+            crate::chart_state::TouchGesture::Tap => 3,
+            crate::chart_state::TouchGesture::LongPress => 4,
+        }
+    }
+
+    /// Advance touch timers (call once per frame for long-press detection)
+    #[no_mangle]
+    pub extern "C" fn chart_touch_tick(chart: *mut Chart) {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.touch_tick();
     }
 
     #[no_mangle]
