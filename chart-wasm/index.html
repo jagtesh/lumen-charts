@@ -76,7 +76,42 @@
             chart_fit_content,
             chart_key_down,
             chart_tick,
+            chart_set_data,
+            chart_set_series_type,
         } from './pkg/chart_wasm.js';
+
+        // Generate ~100 bars of AAPL-like data (same LCG as Rust/Swift)
+        function generateSampleData() {
+            const baseTime = 1704153600; // 2024-01-02 UTC
+            const day = 86400;
+            let price = 185.0;
+            let rng = 42n;
+            const data = new Float64Array(100 * 5);
+
+            function nextRand() {
+                rng = (rng * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn;
+                return Number(rng >> 33n) / Number(1n << 31n) * 2.0 - 1.0;
+            }
+
+            for (let i = 0; i < 100; i++) {
+                const time = baseTime + i * day;
+                const changePct = nextRand() * 0.02;
+                const dailyRange = price * (0.005 + Math.abs(nextRand()) * 0.015);
+                const open = price;
+                const close = price * (1.0 + changePct);
+                const high = Math.max(open, close) + dailyRange * Math.abs(nextRand());
+                const low = Math.min(open, close) - dailyRange * Math.abs(nextRand());
+
+                const base = i * 5;
+                data[base] = time;
+                data[base + 1] = open;
+                data[base + 2] = Math.max(high, Math.max(open, close));
+                data[base + 3] = Math.min(low, Math.min(open, close));
+                data[base + 4] = close;
+                price = close;
+            }
+            return data;
+        }
 
         async function run() {
             const status = document.getElementById('status');
@@ -90,7 +125,13 @@
             try {
                 status.textContent = '⏳ Loading WASM module...';
                 await init();
-                status.textContent = '✅ Chart rendered — interactive!';
+
+                // Load sample data from JS
+                const data = generateSampleData();
+                chart_set_data(data);
+                chart_fit_content();
+
+                status.textContent = '✅ Chart rendered — 100 bars from JS';
                 status.style.color = '#26a69a';
             } catch (e) {
                 console.error('Failed to initialize:', e);

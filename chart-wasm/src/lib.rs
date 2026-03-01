@@ -7,7 +7,6 @@ use std::rc::Rc;
 use chart_core::chart_model::ChartData;
 use chart_core::chart_renderer::render_chart;
 use chart_core::chart_state::ChartState;
-use chart_core::sample_data::sample_data;
 
 /// Persistent chart context for the WASM module
 struct WasmChart {
@@ -153,9 +152,8 @@ pub async fn main() {
     )
     .expect("Failed to create Vello renderer");
 
-    let data = ChartData {
-        bars: sample_data(),
-    };
+    // Start with empty data — host JS calls chart_set_data() to load bars
+    let data = ChartData { bars: Vec::new() };
     let state = ChartState::new(data, width as f32, height as f32, scale_factor);
 
     let mut chart = WasmChart {
@@ -230,5 +228,42 @@ pub fn chart_tick() {
         if let Some(chart) = c.borrow_mut().as_mut() {
             chart.state.tick();
         }
+    });
+}
+
+/// Set bar data from a flat Float64Array: [time, open, high, low, close, ...]
+#[wasm_bindgen]
+pub fn chart_set_data(data: &[f64]) {
+    let count = data.len() / 5;
+    let bars: Vec<chart_core::chart_model::OhlcBar> = (0..count)
+        .map(|i| {
+            let base = i * 5;
+            chart_core::chart_model::OhlcBar {
+                time: data[base] as i64,
+                open: data[base + 1],
+                high: data[base + 2],
+                low: data[base + 3],
+                close: data[base + 4],
+            }
+        })
+        .collect();
+
+    with_chart(|chart| {
+        chart.state.set_data(bars);
+        true
+    });
+}
+
+/// Set series type: 0=OHLC, 1=Candlestick, 2=Line
+#[wasm_bindgen]
+pub fn chart_set_series_type(series_type: u32) {
+    with_chart(|chart| {
+        chart.state.active_series_type = match series_type {
+            0 => chart_core::series::SeriesType::Ohlc,
+            1 => chart_core::series::SeriesType::Candlestick,
+            2 => chart_core::series::SeriesType::Line,
+            _ => return false,
+        };
+        true
     });
 }

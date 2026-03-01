@@ -21,7 +21,6 @@ mod native {
     use crate::chart_model::ChartData;
     use crate::chart_renderer::render_chart;
     use crate::chart_state::ChartState;
-    use crate::sample_data::sample_data;
 
     use vello::wgpu;
     use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
@@ -48,9 +47,8 @@ mod native {
     ) -> *mut Chart {
         env_logger::try_init().ok();
 
-        let data = ChartData {
-            bars: sample_data(),
-        };
+        // Start with empty data — host should call chart_set_data() to provide bars
+        let data = ChartData { bars: Vec::new() };
         let state = ChartState::new(data, width as f32, height as f32, scale_factor);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {

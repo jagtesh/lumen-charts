@@ -132,6 +132,8 @@ pub struct ChartState {
 
     // Y-axis drag state (for price scale zoom)
     y_axis_drag_start_range: Option<(f64, f64)>,
+    // X-axis drag state (for time scale zoom)
+    x_axis_drag_start_spacing: Option<f32>,
 
     /// Pending events from the last interaction call
     pub pending_events: InteractionEvents,
@@ -169,6 +171,7 @@ impl ChartState {
             frames_since_last_click: DBL_CLICK_MAX_FRAMES + 1,
             click_pending: false,
             y_axis_drag_start_range: None,
+            x_axis_drag_start_spacing: None,
             pending_events: InteractionEvents::default(),
         }
     }
@@ -257,15 +260,14 @@ impl ChartState {
                     self.update_price_scale();
                 }
                 Some(HitZone::YAxis) => {
-                    // Y-axis drag: zoom price scale
-                    let delta_y = y - self.drag.last_y;
+                    // Y-axis drag: zoom price scale using cumulative delta from start
+                    let delta_y = y - self.drag.start_y;
                     self.drag_price_scale(delta_y);
                 }
                 Some(HitZone::XAxis) => {
-                    // X-axis drag: scroll time
-                    let delta_px = self.drag.last_x - x;
-                    self.time_scale.scroll_by_pixels(delta_px);
-                    self.update_price_scale();
+                    // X-axis drag: zoom time scale (expand/collapse bars like LWC)
+                    let delta_x = x - self.drag.start_x;
+                    self.drag_time_scale(delta_x);
                 }
                 _ => {}
             }
@@ -315,6 +317,10 @@ impl ChartState {
                 self.y_axis_drag_start_range =
                     Some((self.price_scale.min_price, self.price_scale.max_price));
             }
+            // Save bar spacing for X-axis drag zoom
+            if zone == HitZone::XAxis {
+                self.x_axis_drag_start_spacing = Some(self.time_scale.bar_spacing);
+            }
         }
         false
     }
@@ -326,6 +332,7 @@ impl ChartState {
         let was_click = self.drag.total_distance < CLICK_DISTANCE_THRESHOLD;
         self.drag.active = false;
         self.y_axis_drag_start_range = None;
+        self.x_axis_drag_start_spacing = None;
         self.pending_events = InteractionEvents::default();
 
         if was_dragging && was_click {
@@ -483,6 +490,20 @@ impl ChartState {
             let new_half = range * factor / 2.0;
             self.price_scale.min_price = mid - new_half;
             self.price_scale.max_price = mid + new_half;
+        }
+    }
+
+    /// Handle time scale drag (zooming the X-axis like LWC).
+    /// delta_x > 0 = pointer moved right = expand (zoom in)
+    /// delta_x < 0 = pointer moved left = compress (zoom out)
+    fn drag_time_scale(&mut self, delta_x: f32) {
+        if let Some(orig_spacing) = self.x_axis_drag_start_spacing {
+            // Scale: every 100px of drag doubles/halves spacing
+            let factor = 1.0 + (delta_x / 100.0);
+            let factor = factor.clamp(0.1, 10.0);
+            let new_spacing = (orig_spacing * factor).clamp(2.0, 50.0);
+            self.time_scale.bar_spacing = new_spacing;
+            self.update_price_scale();
         }
     }
 
@@ -763,20 +784,22 @@ mod tests {
     }
 
     #[test]
-    fn test_x_axis_drag_scrolls() {
+    fn test_x_axis_drag_zooms() {
         let mut state = make_state();
         let ax = state.layout.plot_area.x + 200.0;
         let ay = state.layout.plot_area.y + state.layout.plot_area.height + 10.0;
-        let scroll_before = state.time_scale.scroll_offset;
+        let spacing_before = state.time_scale.bar_spacing;
 
         state.pointer_down(ax, ay, 0);
-        state.pointer_move(ax - 30.0, ay);
+        state.pointer_move(ax + 50.0, ay); // Drag right = zoom in (expand)
         assert!(
-            state.time_scale.scroll_offset > scroll_before,
-            "Should scroll right"
+            state.time_scale.bar_spacing > spacing_before,
+            "Should expand bar spacing: {} > {}",
+            state.time_scale.bar_spacing,
+            spacing_before
         );
 
-        state.pointer_up(ax - 30.0, ay, 0);
+        state.pointer_up(ax + 50.0, ay, 0);
     }
 
     #[test]
