@@ -1,9 +1,11 @@
 /// Chart configuration options — mirrors LWC's ChartOptions / TimeChartOptions.
 ///
 /// All colors are stored as `[r, g, b, a]` arrays (0.0..1.0).
+use serde::{Deserialize, Serialize};
 
 /// Price formatting configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PriceFormatOptions {
     /// Number of decimal places
     pub precision: u8,
@@ -37,7 +39,7 @@ impl PriceFormatOptions {
 }
 
 /// Time label format
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum TimeFormat {
     /// "Jan 02"
     MonthDay,
@@ -56,7 +58,8 @@ impl Default for TimeFormat {
 }
 
 /// Grid line options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GridOptions {
     pub visible: bool,
     pub color: [f32; 4],
@@ -72,7 +75,8 @@ impl Default for GridOptions {
 }
 
 /// Crosshair options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CrosshairOptions {
     pub visible: bool,
     pub color: [f32; 4],
@@ -90,7 +94,8 @@ impl Default for CrosshairOptions {
 }
 
 /// Price scale (Y-axis) options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PriceScaleOptions {
     pub visible: bool,
     /// Auto-scale to visible data
@@ -113,7 +118,8 @@ impl Default for PriceScaleOptions {
 }
 
 /// Time scale (X-axis) options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TimeScaleOptions {
     pub visible: bool,
     pub time_format: TimeFormat,
@@ -138,7 +144,8 @@ impl Default for TimeScaleOptions {
 }
 
 /// Bar/candlestick color options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SeriesColors {
     pub bull_color: [f32; 4],
     pub bear_color: [f32; 4],
@@ -154,7 +161,8 @@ impl Default for SeriesColors {
 }
 
 /// Layout options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LayoutOptions {
     pub background_color: [f32; 4],
     pub text_color: [f32; 4],
@@ -172,7 +180,8 @@ impl Default for LayoutOptions {
 }
 
 /// Top-level chart options
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChartOptions {
     pub layout: LayoutOptions,
     pub grid: GridOptions,
@@ -180,6 +189,35 @@ pub struct ChartOptions {
     pub price_scale: PriceScaleOptions,
     pub time_scale: TimeScaleOptions,
     pub series_colors: SeriesColors,
+}
+/// Merge a partial JSON object into a full JSON object recursively.
+pub fn merge_json(target: &mut serde_json::Value, source: serde_json::Value) {
+    match (target, source) {
+        (&mut serde_json::Value::Object(ref mut t), serde_json::Value::Object(s)) => {
+            for (k, v) in s {
+                merge_json(t.entry(k).or_insert(serde_json::Value::Null), v);
+            }
+        }
+        (t, s) => {
+            *t = s;
+        }
+    }
+}
+
+impl ChartOptions {
+    /// Applies a JSON string of partial options to the current options.
+    pub fn apply_json(&mut self, json_str: &str) -> bool {
+        if let Ok(partial) = serde_json::from_str::<serde_json::Value>(json_str) {
+            if let Ok(mut full) = serde_json::to_value(&*self) {
+                merge_json(&mut full, partial);
+                if let Ok(new_opts) = serde_json::from_value(full) {
+                    *self = new_opts;
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 use crate::chart_model::OhlcBar;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Series types
@@ -43,7 +44,8 @@ pub struct LineDataPoint {
 // ---------------------------------------------------------------------------
 
 /// Options specific to candlestick series
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CandlestickOptions {
     pub up_color: [f32; 4],
     pub down_color: [f32; 4],
@@ -70,7 +72,8 @@ impl Default for CandlestickOptions {
 }
 
 /// Options specific to line series
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LineSeriesOptions {
     pub color: [f32; 4],
     pub line_width: f32,
@@ -91,7 +94,8 @@ impl Default for LineSeriesOptions {
 }
 
 /// Options specific to area series (LWC: AreaSeriesOptions)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AreaSeriesOptions {
     /// Line color at the top
     pub line_color: [f32; 4],
@@ -114,7 +118,8 @@ impl Default for AreaSeriesOptions {
 }
 
 /// Options specific to histogram series (LWC: HistogramSeriesOptions)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HistogramSeriesOptions {
     /// Default bar color
     pub color: [f32; 4],
@@ -141,7 +146,8 @@ pub struct HistogramDataPoint {
 }
 
 /// Options specific to baseline series (LWC: BaselineSeriesOptions)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BaselineSeriesOptions {
     /// The baseline value that splits top/bottom areas
     pub base_value: f64,
@@ -248,6 +254,117 @@ impl SeriesData {
             }
         }
     }
+
+    pub fn set_ohlc(&mut self, bars: Vec<OhlcBar>) {
+        if let SeriesData::Ohlc(ref mut data) = self {
+            *data = bars;
+        }
+    }
+
+    pub fn set_line(&mut self, pts: Vec<LineDataPoint>) {
+        if let SeriesData::Line(ref mut data) = self {
+            *data = pts;
+        }
+    }
+
+    pub fn set_histogram(&mut self, pts: Vec<HistogramDataPoint>) {
+        if let SeriesData::Histogram(ref mut data) = self {
+            *data = pts;
+        }
+    }
+
+    pub fn update_ohlc(&mut self, bar: OhlcBar) {
+        if let SeriesData::Ohlc(ref mut data) = self {
+            if let Some(last) = data.last_mut() {
+                if last.time == bar.time {
+                    *last = bar;
+                    return;
+                } else if bar.time < last.time {
+                    // For MVP historical updates, do binary search and replace if exists
+                    if let Ok(idx) = data.binary_search_by_key(&bar.time, |b| b.time) {
+                        data[idx] = bar;
+                    }
+                    return;
+                }
+            }
+            data.push(bar);
+        }
+    }
+
+    pub fn update_line(&mut self, pt: LineDataPoint) {
+        if let SeriesData::Line(ref mut data) = self {
+            if let Some(last) = data.last_mut() {
+                if last.time == pt.time {
+                    *last = pt;
+                    return;
+                } else if pt.time < last.time {
+                    if let Ok(idx) = data.binary_search_by_key(&pt.time, |p| p.time) {
+                        data[idx] = pt;
+                    }
+                    return;
+                }
+            }
+            data.push(pt);
+        }
+    }
+
+    pub fn update_histogram(&mut self, pt: HistogramDataPoint) {
+        if let SeriesData::Histogram(ref mut data) = self {
+            if let Some(last) = data.last_mut() {
+                if last.time == pt.time {
+                    *last = pt;
+                    return;
+                } else if pt.time < last.time {
+                    if let Ok(idx) = data.binary_search_by_key(&pt.time, |p| p.time) {
+                        data[idx] = pt;
+                    }
+                    return;
+                }
+            }
+            data.push(pt);
+        }
+    }
+
+    pub fn pop(&mut self, count: usize) {
+        match self {
+            SeriesData::Ohlc(bars) => {
+                bars.truncate(bars.len().saturating_sub(count));
+            }
+            SeriesData::Line(pts) => {
+                pts.truncate(pts.len().saturating_sub(count));
+            }
+            SeriesData::Histogram(pts) => {
+                pts.truncate(pts.len().saturating_sub(count));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Price Lines
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PriceLineOptions {
+    pub price: f64,
+    pub color: [f32; 4],
+    pub line_width: f32,
+    /// 0=Solid, 1=Dotted, 2=Dashed
+    pub line_style: u8,
+    pub title: String,
+}
+
+impl Default for PriceLineOptions {
+    fn default() -> Self {
+        PriceLineOptions {
+            price: 0.0,
+            color: [0.8, 0.2, 0.2, 1.0],
+            line_width: 1.0,
+            line_style: 0,
+            title: String::new(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +383,9 @@ pub struct Series {
     pub histogram_options: HistogramSeriesOptions,
     pub baseline_options: BaselineSeriesOptions,
     pub visible: bool,
+    pub pane_index: usize,
+    pub price_lines: Vec<(u32, PriceLineOptions)>,
+    pub next_price_line_id: u32,
 }
 
 impl Series {
@@ -281,6 +401,9 @@ impl Series {
             histogram_options: HistogramSeriesOptions::default(),
             baseline_options: BaselineSeriesOptions::default(),
             visible: true,
+            pane_index: 0,
+            price_lines: Vec::new(),
+            next_price_line_id: 1,
         }
     }
 
@@ -296,6 +419,9 @@ impl Series {
             histogram_options: HistogramSeriesOptions::default(),
             baseline_options: BaselineSeriesOptions::default(),
             visible: true,
+            pane_index: 0,
+            price_lines: Vec::new(),
+            next_price_line_id: 1,
         }
     }
 
@@ -311,6 +437,9 @@ impl Series {
             histogram_options: HistogramSeriesOptions::default(),
             baseline_options: BaselineSeriesOptions::default(),
             visible: true,
+            pane_index: 0,
+            price_lines: Vec::new(),
+            next_price_line_id: 1,
         }
     }
 
@@ -326,6 +455,9 @@ impl Series {
             histogram_options: HistogramSeriesOptions::default(),
             baseline_options: BaselineSeriesOptions::default(),
             visible: true,
+            pane_index: 0,
+            price_lines: Vec::new(),
+            next_price_line_id: 1,
         }
     }
 
@@ -341,6 +473,9 @@ impl Series {
             histogram_options: HistogramSeriesOptions::default(),
             baseline_options: BaselineSeriesOptions::default(),
             visible: true,
+            pane_index: 0,
+            price_lines: Vec::new(),
+            next_price_line_id: 1,
         }
     }
 
@@ -356,9 +491,27 @@ impl Series {
             histogram_options: HistogramSeriesOptions::default(),
             baseline_options: BaselineSeriesOptions::default(),
             visible: true,
+            pane_index: 0,
+            price_lines: Vec::new(),
+            next_price_line_id: 1,
         };
         s.baseline_options.base_value = base_value;
         s
+    }
+
+    /// Add a generic price line to this series
+    pub fn add_price_line(&mut self, options: PriceLineOptions) -> u32 {
+        let id = self.next_price_line_id;
+        self.next_price_line_id += 1;
+        self.price_lines.push((id, options));
+        id
+    }
+
+    /// Remove a price line by its internally generated ID
+    pub fn remove_price_line(&mut self, id: u32) -> bool {
+        let before = self.price_lines.len();
+        self.price_lines.retain(|(lid, _)| *lid != id);
+        self.price_lines.len() < before
     }
 
     /// Is this series bullish at a given bar?
@@ -367,6 +520,63 @@ impl Series {
             SeriesData::Ohlc(bars) => bars.get(index).map_or(false, |b| b.close >= b.open),
             SeriesData::Line(_) | SeriesData::Histogram(_) => true,
         }
+    }
+
+    /// Applies a JSON string of partial options to the current series options.
+    pub fn apply_options_json(&mut self, json_str: &str) -> bool {
+        let partial = match serde_json::from_str::<serde_json::Value>(json_str) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+
+        match self.series_type {
+            SeriesType::Ohlc | SeriesType::Candlestick => {
+                if let Ok(mut full) = serde_json::to_value(&self.candlestick_options) {
+                    crate::chart_options::merge_json(&mut full, partial);
+                    if let Ok(new_opts) = serde_json::from_value(full) {
+                        self.candlestick_options = new_opts;
+                        return true;
+                    }
+                }
+            }
+            SeriesType::Line => {
+                if let Ok(mut full) = serde_json::to_value(&self.line_options) {
+                    crate::chart_options::merge_json(&mut full, partial);
+                    if let Ok(new_opts) = serde_json::from_value(full) {
+                        self.line_options = new_opts;
+                        return true;
+                    }
+                }
+            }
+            SeriesType::Area => {
+                if let Ok(mut full) = serde_json::to_value(&self.area_options) {
+                    crate::chart_options::merge_json(&mut full, partial);
+                    if let Ok(new_opts) = serde_json::from_value(full) {
+                        self.area_options = new_opts;
+                        return true;
+                    }
+                }
+            }
+            SeriesType::Histogram => {
+                if let Ok(mut full) = serde_json::to_value(&self.histogram_options) {
+                    crate::chart_options::merge_json(&mut full, partial);
+                    if let Ok(new_opts) = serde_json::from_value(full) {
+                        self.histogram_options = new_opts;
+                        return true;
+                    }
+                }
+            }
+            SeriesType::Baseline => {
+                if let Ok(mut full) = serde_json::to_value(&self.baseline_options) {
+                    crate::chart_options::merge_json(&mut full, partial);
+                    if let Ok(new_opts) = serde_json::from_value(full) {
+                        self.baseline_options = new_opts;
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 }
 

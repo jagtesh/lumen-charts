@@ -60,8 +60,13 @@ impl TimeScale {
 
     /// Convert bar index to center x pixel coordinate within the plot area
     pub fn index_to_x(&self, index: usize, plot_area: &Rect) -> f32 {
+        self.logical_to_x(index as f32, plot_area)
+    }
+
+    /// Convert fractional logical index to center x pixel coordinate
+    pub fn logical_to_x(&self, logical: f32, plot_area: &Rect) -> f32 {
         let first = self.first_visible_index(plot_area.width);
-        plot_area.x + (index as f32 - first + 0.5) * self.bar_spacing
+        plot_area.x + (logical - first + 0.5) * self.bar_spacing
     }
 
     /// Convert x pixel coordinate to bar index (may be fractional)

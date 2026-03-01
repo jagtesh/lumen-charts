@@ -27,38 +27,46 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
 
     let layout = &state.layout;
     let font = chart_font();
-    let price_ticks = generate_price_ticks(&state.price_scale, &layout.plot_area);
     let time_ticks = generate_time_ticks(&state.data.bars, &state.time_scale, &layout.plot_area);
 
     let t = Affine::scale(layout.scale_factor);
 
     draw_background(scene, layout, t);
-    draw_grid(scene, &price_ticks, &time_ticks, &layout.plot_area, t);
+    draw_grid(scene, state, &time_ticks, t);
 
     // Watermark behind bars
     if state.overlays.watermark.visible {
         draw_watermark(scene, state, &font, t);
     }
 
-    // Draw primary series (from state.data, using active_series_type)
+    // Draw primary series (from state.data, using active_series_type) typically on pane 0
     match state.active_series_type {
-        SeriesType::Ohlc => draw_ohlc_bars(scene, state, t),
-        SeriesType::Candlestick => draw_candlestick_bars(scene, state, t),
-        SeriesType::Line => draw_line_series_from_ohlc(scene, state, t),
+        SeriesType::Ohlc => draw_ohlc_bars(scene, 0, state, t),
+        SeriesType::Candlestick => draw_candlestick_bars(scene, 0, state, t),
+        SeriesType::Line => draw_line_series_from_ohlc(scene, 0, state, t),
         SeriesType::Area => {
-            // Adapt OHLC to LineDataPoints for area renderer
             let points = ohlc_to_line_points(&state.data.bars);
             let opts = crate::series::AreaSeriesOptions::default();
-            draw_area_series(scene, state, &points, &opts, t);
+            draw_area_series(scene, 0, state, &points, &opts, t);
         }
         SeriesType::Baseline => {
             let points = ohlc_to_line_points(&state.data.bars);
             let opts = crate::series::BaselineSeriesOptions::default();
-            draw_baseline_series(scene, state, &points, &opts, t);
+            draw_baseline_series(scene, 0, state, &points, &opts, t);
         }
         SeriesType::Histogram => {
-            // Histogram from OHLC shows as line for now (since we don't have base/colors from OHLC)
-            draw_line_series_from_ohlc(scene, state, t);
+            let points: Vec<crate::series::HistogramDataPoint> = state
+                .data
+                .bars
+                .iter()
+                .map(|b| crate::series::HistogramDataPoint {
+                    time: b.time,
+                    value: b.close,
+                    color: None,
+                })
+                .collect();
+            let opts = crate::series::HistogramSeriesOptions::default();
+            draw_histogram_series(scene, 0, state, &points, &opts, t);
         }
     }
 
@@ -67,21 +75,29 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
         if !series.visible {
             continue;
         }
+        let p_idx = series.pane_index;
         match (&series.series_type, &series.data) {
             (SeriesType::Line, SeriesData::Line(pts)) => {
-                draw_line_series(scene, state, pts, &series.line_options, t);
+                draw_line_series(scene, p_idx, state, pts, &series.line_options, t);
             }
             (SeriesType::Area, SeriesData::Line(pts)) => {
-                draw_area_series(scene, state, pts, &series.area_options, t);
+                draw_area_series(scene, p_idx, state, pts, &series.area_options, t);
             }
             (SeriesType::Baseline, SeriesData::Line(pts)) => {
-                draw_baseline_series(scene, state, pts, &series.baseline_options, t);
+                draw_baseline_series(scene, p_idx, state, pts, &series.baseline_options, t);
             }
             (SeriesType::Candlestick, SeriesData::Ohlc(bars)) => {
-                draw_candlestick_bars_data(scene, state, bars, &series.candlestick_options, t);
+                draw_candlestick_bars_data(
+                    scene,
+                    p_idx,
+                    state,
+                    bars,
+                    &series.candlestick_options,
+                    t,
+                );
             }
             (SeriesType::Histogram, SeriesData::Histogram(pts)) => {
-                draw_histogram_series(scene, state, pts, &series.histogram_options, t);
+                draw_histogram_series(scene, p_idx, state, pts, &series.histogram_options, t);
             }
             _ => {} // Other combos use default OHLC
         }
@@ -92,7 +108,7 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
     draw_series_markers(scene, state, t);
     draw_last_value_marker(scene, state, &font, t);
 
-    draw_y_axis(scene, &price_ticks, layout, &font, t);
+    draw_y_axis(scene, state, layout, &font, t);
     draw_x_axis(scene, &time_ticks, layout, &font, t);
 
     if state.crosshair.visible {
@@ -110,28 +126,9 @@ fn draw_background(scene: &mut Scene, layout: &crate::chart_model::ChartLayout, 
     );
 }
 
-fn draw_grid(
-    scene: &mut Scene,
-    price_ticks: &[TickMark],
-    time_ticks: &[TickMark],
-    plot_area: &Rect,
-    t: Affine,
-) {
+fn draw_grid(scene: &mut Scene, state: &ChartState, time_ticks: &[TickMark], t: Affine) {
     let stroke = Stroke::new(1.0);
-
-    for tick in price_ticks {
-        let y = tick.coord as f64;
-        scene.stroke(
-            &stroke,
-            t,
-            GRID_COLOR,
-            None,
-            &Line::new(
-                (plot_area.x as f64, y),
-                ((plot_area.x + plot_area.width) as f64, y),
-            ),
-        );
-    }
+    let plot_area = &state.layout.plot_area;
 
     for tick in time_ticks {
         let x = tick.coord as f64;
@@ -147,24 +144,43 @@ fn draw_grid(
         );
     }
 
-    scene.stroke(
-        &Stroke::new(1.0),
-        t,
-        AXIS_COLOR,
-        None,
-        &KurboRect::new(
-            plot_area.x as f64,
-            plot_area.y as f64,
-            (plot_area.x + plot_area.width) as f64,
-            (plot_area.y + plot_area.height) as f64,
-        ),
-    );
+    for pane in &state.panes {
+        let price_ticks = generate_price_ticks(&pane.price_scale, &pane.layout_rect);
+
+        for tick in price_ticks {
+            let y = tick.coord as f64;
+            scene.stroke(
+                &stroke,
+                t,
+                GRID_COLOR,
+                None,
+                &Line::new(
+                    (pane.layout_rect.x as f64, y),
+                    ((pane.layout_rect.x + pane.layout_rect.width) as f64, y),
+                ),
+            );
+        }
+
+        scene.stroke(
+            &Stroke::new(1.0),
+            t,
+            AXIS_COLOR,
+            None,
+            &KurboRect::new(
+                pane.layout_rect.x as f64,
+                pane.layout_rect.y as f64,
+                (pane.layout_rect.x + pane.layout_rect.width) as f64,
+                (pane.layout_rect.y + pane.layout_rect.height) as f64,
+            ),
+        );
+    }
 }
 
-fn draw_ohlc_bars(scene: &mut Scene, state: &ChartState, t: Affine) {
+fn draw_ohlc_bars(scene: &mut Scene, pane_index: usize, state: &ChartState, t: Affine) {
+    let pane = &state.panes[pane_index];
+    let plot_area = &pane.layout_rect;
     let bar_width = state.time_scale.bar_spacing * 0.3;
     let line_width = 1.5;
-    let plot_area = &state.layout.plot_area;
 
     // Only draw visible bars
     let (first, last) = state.time_scale.visible_range(plot_area.width);
@@ -182,10 +198,10 @@ fn draw_ohlc_bars(scene: &mut Scene, state: &ChartState, t: Affine) {
             continue;
         }
 
-        let high_y = state.price_scale.price_to_y(bar.high, plot_area) as f64;
-        let low_y = state.price_scale.price_to_y(bar.low, plot_area) as f64;
-        let open_y = state.price_scale.price_to_y(bar.open, plot_area) as f64;
-        let close_y = state.price_scale.price_to_y(bar.close, plot_area) as f64;
+        let high_y = pane.price_scale.price_to_y(bar.high, plot_area) as f64;
+        let low_y = pane.price_scale.price_to_y(bar.low, plot_area) as f64;
+        let open_y = pane.price_scale.price_to_y(bar.open, plot_area) as f64;
+        let close_y = pane.price_scale.price_to_y(bar.close, plot_area) as f64;
 
         let color = if bar.close >= bar.open {
             BULL_COLOR
@@ -305,41 +321,44 @@ fn draw_crosshair(scene: &mut Scene, state: &ChartState, font: &Font, t: Affine)
 
 fn draw_y_axis(
     scene: &mut Scene,
-    price_ticks: &[TickMark],
+    state: &ChartState,
     layout: &crate::chart_model::ChartLayout,
     font: &Font,
     t: Affine,
 ) {
     let x_start = layout.plot_area.x + layout.plot_area.width + 5.0;
 
-    for tick in price_ticks {
-        scene.stroke(
-            &Stroke::new(1.0),
-            t,
-            AXIS_COLOR,
-            None,
-            &Line::new(
-                (
-                    (layout.plot_area.x + layout.plot_area.width) as f64,
-                    tick.coord as f64,
+    for pane in &state.panes {
+        let price_ticks = generate_price_ticks(&pane.price_scale, &pane.layout_rect);
+        for tick in &price_ticks {
+            scene.stroke(
+                &Stroke::new(1.0),
+                t,
+                AXIS_COLOR,
+                None,
+                &Line::new(
+                    (
+                        (layout.plot_area.x + layout.plot_area.width) as f64,
+                        tick.coord as f64,
+                    ),
+                    (
+                        (layout.plot_area.x + layout.plot_area.width + 4.0) as f64,
+                        tick.coord as f64,
+                    ),
                 ),
-                (
-                    (layout.plot_area.x + layout.plot_area.width + 4.0) as f64,
-                    tick.coord as f64,
-                ),
-            ),
-        );
+            );
 
-        draw_text(
-            scene,
-            font,
-            &tick.label,
-            x_start as f64,
-            (tick.coord + 4.0) as f64,
-            LABEL_FONT_SIZE,
-            TEXT_COLOR,
-            t,
-        );
+            draw_text(
+                scene,
+                font,
+                &format!("{:.2}", tick.value),
+                x_start as f64,
+                (tick.coord + 4.0) as f64,
+                LABEL_FONT_SIZE,
+                TEXT_COLOR,
+                t,
+            );
+        }
     }
 }
 
@@ -390,11 +409,12 @@ fn draw_x_axis(
 // ---------------------------------------------------------------------------
 
 fn draw_price_lines(scene: &mut Scene, state: &ChartState, font: &Font, t: Affine) {
-    let plot = &state.layout.plot_area;
+    let pane = &state.panes[0];
+    let plot = &pane.layout_rect;
     let stroke = Stroke::new(1.0);
 
     for line in &state.overlays.price_lines {
-        let y = state.price_scale.price_to_y(line.price, plot);
+        let y = pane.price_scale.price_to_y(line.price, plot);
         if y < plot.y || y > plot.y + plot.height {
             continue; // Off-screen
         }
@@ -466,7 +486,8 @@ fn draw_price_lines(scene: &mut Scene, state: &ChartState, font: &Font, t: Affin
 }
 
 fn draw_series_markers(scene: &mut Scene, state: &ChartState, t: Affine) {
-    let plot = &state.layout.plot_area;
+    let pane = &state.panes[0];
+    let plot = &pane.layout_rect;
 
     for marker in &state.overlays.markers {
         // Find the bar index for this marker's time
@@ -486,7 +507,7 @@ fn draw_series_markers(scene: &mut Scene, state: &ChartState, t: Affine) {
         }
 
         let price = marker.y_price(bar);
-        let y = state.price_scale.price_to_y(price, plot);
+        let y = pane.price_scale.price_to_y(price, plot);
         let offset = match marker.position {
             MarkerPosition::AboveBar => -(marker.size + 4.0),
             MarkerPosition::BelowBar => marker.size + 4.0,
@@ -568,9 +589,10 @@ fn draw_last_value_marker(scene: &mut Scene, state: &ChartState, font: &Font, t:
         return;
     }
 
+    let pane = &state.panes[0];
     let last_bar = state.data.bars.last().unwrap();
-    let plot = &state.layout.plot_area;
-    let y = state.price_scale.price_to_y(last_bar.close, plot);
+    let plot = &pane.layout_rect;
+    let y = pane.price_scale.price_to_y(last_bar.close, plot);
 
     if y < plot.y || y > plot.y + plot.height {
         return;
@@ -625,8 +647,9 @@ fn draw_last_value_marker(scene: &mut Scene, state: &ChartState, font: &Font, t:
 // Candlestick renderer
 // ---------------------------------------------------------------------------
 
-fn draw_candlestick_bars(scene: &mut Scene, state: &ChartState, t: Affine) {
-    let plot_area = &state.layout.plot_area;
+fn draw_candlestick_bars(scene: &mut Scene, pane_index: usize, state: &ChartState, t: Affine) {
+    let pane = &state.panes[pane_index];
+    let plot_area = &pane.layout_rect;
     let (first, last) = state.time_scale.visible_range(plot_area.width);
     let first = first.saturating_sub(1);
     let last = (last + 1).min(state.data.bars.len());
@@ -639,10 +662,10 @@ fn draw_candlestick_bars(scene: &mut Scene, state: &ChartState, t: Affine) {
             continue;
         }
 
-        let high_y = state.price_scale.price_to_y(bar.high, plot_area);
-        let low_y = state.price_scale.price_to_y(bar.low, plot_area);
-        let open_y = state.price_scale.price_to_y(bar.open, plot_area);
-        let close_y = state.price_scale.price_to_y(bar.close, plot_area);
+        let high_y = pane.price_scale.price_to_y(bar.high, plot_area);
+        let low_y = pane.price_scale.price_to_y(bar.low, plot_area);
+        let open_y = pane.price_scale.price_to_y(bar.open, plot_area);
+        let close_y = pane.price_scale.price_to_y(bar.close, plot_area);
         let bullish = bar.close >= bar.open;
 
         let fill_color = if bullish { BULL_COLOR } else { BEAR_COLOR };
@@ -682,12 +705,14 @@ fn draw_candlestick_bars(scene: &mut Scene, state: &ChartState, t: Affine) {
 /// Draw candlestick bars from arbitrary bar data (for multi-series support)
 fn draw_candlestick_bars_data(
     scene: &mut Scene,
+    pane_index: usize,
     state: &ChartState,
     bars: &[crate::chart_model::OhlcBar],
     opts: &crate::series::CandlestickOptions,
     t: Affine,
 ) {
-    let plot_area = &state.layout.plot_area;
+    let pane = &state.panes[pane_index];
+    let plot_area = &pane.layout_rect;
     let body_width = (state.time_scale.bar_spacing * 0.6).max(1.0);
 
     for (i, bar) in bars.iter().enumerate() {
@@ -696,10 +721,10 @@ fn draw_candlestick_bars_data(
             continue;
         }
 
-        let high_y = state.price_scale.price_to_y(bar.high, plot_area);
-        let low_y = state.price_scale.price_to_y(bar.low, plot_area);
-        let open_y = state.price_scale.price_to_y(bar.open, plot_area);
-        let close_y = state.price_scale.price_to_y(bar.close, plot_area);
+        let high_y = pane.price_scale.price_to_y(bar.high, plot_area);
+        let low_y = pane.price_scale.price_to_y(bar.low, plot_area);
+        let open_y = pane.price_scale.price_to_y(bar.open, plot_area);
+        let close_y = pane.price_scale.price_to_y(bar.close, plot_area);
         let bullish = bar.close >= bar.open;
 
         let fill_color = Color::new(if bullish {
@@ -747,8 +772,9 @@ fn draw_candlestick_bars_data(
 // ---------------------------------------------------------------------------
 
 /// Draw a line series from OHLC close prices (for primary series)
-fn draw_line_series_from_ohlc(scene: &mut Scene, state: &ChartState, t: Affine) {
-    let plot_area = &state.layout.plot_area;
+fn draw_line_series_from_ohlc(scene: &mut Scene, pane_index: usize, state: &ChartState, t: Affine) {
+    let pane = &state.panes[pane_index];
+    let plot_area = &pane.layout_rect;
     let (first, last) = state.time_scale.visible_range(plot_area.width);
     let first = first.saturating_sub(1);
     let last = (last + 1).min(state.data.bars.len());
@@ -763,10 +789,10 @@ fn draw_line_series_from_ohlc(scene: &mut Scene, state: &ChartState, t: Affine) 
     for i in first..last.saturating_sub(1) {
         let x1 = state.time_scale.index_to_x(i, plot_area);
         let x2 = state.time_scale.index_to_x(i + 1, plot_area);
-        let y1 = state
+        let y1 = pane
             .price_scale
             .price_to_y(state.data.bars[i].close, plot_area);
-        let y2 = state
+        let y2 = pane
             .price_scale
             .price_to_y(state.data.bars[i + 1].close, plot_area);
 
@@ -783,6 +809,7 @@ fn draw_line_series_from_ohlc(scene: &mut Scene, state: &ChartState, t: Affine) 
 /// Draw a line series from LineDataPoint data
 fn draw_line_series(
     scene: &mut Scene,
+    pane_index: usize,
     state: &ChartState,
     points: &[crate::series::LineDataPoint],
     opts: &crate::series::LineSeriesOptions,
@@ -792,15 +819,16 @@ fn draw_line_series(
         return;
     }
 
-    let plot_area = &state.layout.plot_area;
+    let pane = &state.panes[pane_index];
+    let plot_area = &pane.layout_rect;
     let color = Color::new(opts.color);
     let stroke = Stroke::new(opts.line_width as f64);
 
     for i in 0..points.len() - 1 {
         let x1 = state.time_scale.index_to_x(i, plot_area);
         let x2 = state.time_scale.index_to_x(i + 1, plot_area);
-        let y1 = state.price_scale.price_to_y(points[i].value, plot_area);
-        let y2 = state.price_scale.price_to_y(points[i + 1].value, plot_area);
+        let y1 = pane.price_scale.price_to_y(points[i].value, plot_area);
+        let y2 = pane.price_scale.price_to_y(points[i + 1].value, plot_area);
 
         scene.stroke(
             &stroke,
@@ -815,7 +843,7 @@ fn draw_line_series(
     if opts.point_markers_visible {
         for (i, pt) in points.iter().enumerate() {
             let x = state.time_scale.index_to_x(i, plot_area);
-            let y = state.price_scale.price_to_y(pt.value, plot_area);
+            let y = pane.price_scale.price_to_y(pt.value, plot_area);
             let circle =
                 vello::kurbo::Circle::new((x as f64, y as f64), opts.point_markers_radius as f64);
             scene.fill(vello::peniko::Fill::NonZero, t, color, None, &circle);
@@ -836,6 +864,7 @@ fn ohlc_to_line_points(bars: &[crate::chart_model::OhlcBar]) -> Vec<crate::serie
 /// Draw an area series (filled gradient below a line)
 fn draw_area_series(
     scene: &mut Scene,
+    pane_index: usize,
     state: &ChartState,
     points: &[crate::series::LineDataPoint],
     opts: &crate::series::AreaSeriesOptions,
@@ -845,19 +874,20 @@ fn draw_area_series(
         return;
     }
 
-    let plot_area = &state.layout.plot_area;
+    let pane = &state.panes[pane_index];
+    let plot_area = &pane.layout_rect;
     let stroke = Stroke::new(opts.line_width as f64);
     let line_color = Color::new(opts.line_color);
 
     let mut path = BezPath::new();
-    let mut lowest_y = 0.0; // The lowest y value on screen (highest price)
+    let mut lowest_y: f32 = 0.0; // The lowest y value on screen (highest price)
 
     // 1. Draw the stroke line and build the top edge of the fill path
     for i in 0..points.len() - 1 {
         let x1 = state.time_scale.index_to_x(i, plot_area);
         let x2 = state.time_scale.index_to_x(i + 1, plot_area);
-        let y1 = state.price_scale.price_to_y(points[i].value, plot_area);
-        let y2 = state.price_scale.price_to_y(points[i + 1].value, plot_area);
+        let y1 = pane.price_scale.price_to_y(points[i].value, plot_area);
+        let y2 = pane.price_scale.price_to_y(points[i + 1].value, plot_area);
 
         if i == 0 {
             path.move_to((x1 as f64, y1 as f64));
@@ -903,6 +933,7 @@ fn draw_area_series(
 /// Draw a baseline series (filled areas above and below a baseline)
 fn draw_baseline_series(
     scene: &mut Scene,
+    pane_index: usize,
     state: &ChartState,
     points: &[crate::series::LineDataPoint],
     opts: &crate::series::BaselineSeriesOptions,
@@ -912,8 +943,9 @@ fn draw_baseline_series(
         return;
     }
 
-    let plot_area = &state.layout.plot_area;
-    let base_y = state.price_scale.price_to_y(opts.base_value, plot_area);
+    let pane = &state.panes[pane_index];
+    let plot_area = &pane.layout_rect;
+    let base_y = pane.price_scale.price_to_y(opts.base_value, plot_area);
 
     let top_stroke = Stroke::new(opts.line_width as f64);
     let bottom_stroke = Stroke::new(opts.line_width as f64);
@@ -929,8 +961,8 @@ fn draw_baseline_series(
     for i in 0..points.len() - 1 {
         let x1 = state.time_scale.index_to_x(i, plot_area);
         let x2 = state.time_scale.index_to_x(i + 1, plot_area);
-        let y1 = state.price_scale.price_to_y(points[i].value, plot_area);
-        let y2 = state.price_scale.price_to_y(points[i + 1].value, plot_area);
+        let y1 = pane.price_scale.price_to_y(points[i].value, plot_area);
+        let y2 = pane.price_scale.price_to_y(points[i + 1].value, plot_area);
 
         if i == 0 {
             path.move_to((x1 as f64, y1 as f64));
@@ -1008,19 +1040,21 @@ fn draw_baseline_series(
 /// Draw a histogram series — vertical bars from base to value
 fn draw_histogram_series(
     scene: &mut Scene,
+    pane_index: usize,
     state: &ChartState,
     points: &[crate::series::HistogramDataPoint],
     opts: &crate::series::HistogramSeriesOptions,
     t: Affine,
 ) {
-    let plot_area = &state.layout.plot_area;
+    let pane = &state.panes[pane_index];
+    let plot_area = &pane.layout_rect;
     let default_color = Color::new(opts.color);
     let bar_width = (state.time_scale.bar_spacing * 0.7).max(1.0);
-    let base_y = state.price_scale.price_to_y(opts.base, plot_area);
+    let base_y = pane.price_scale.price_to_y(opts.base, plot_area);
 
     for (i, pt) in points.iter().enumerate() {
         let x = state.time_scale.index_to_x(i, plot_area);
-        let y = state.price_scale.price_to_y(pt.value, plot_area);
+        let y = pane.price_scale.price_to_y(pt.value, plot_area);
 
         let color = pt.color.map_or(default_color, |c| Color::new(c));
 

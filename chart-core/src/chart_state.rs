@@ -111,11 +111,31 @@ const CLICK_DISTANCE_THRESHOLD: f32 = 5.0;
 /// We use a frame-count approximation since we don't have real timers.
 const DBL_CLICK_MAX_FRAMES: u32 = 20; // ~20 frames ≈ 333ms at 60fps
 
+/// A single pane containing its own price scale and bounding box
+#[derive(Debug, Clone)]
+pub struct PaneState {
+    pub id: u32,
+    pub price_scale: PriceScale,
+    pub height_stretch: f32,
+    pub layout_rect: crate::chart_model::Rect,
+}
+
+impl PaneState {
+    pub fn new(id: u32, price_scale: PriceScale, layout_rect: crate::chart_model::Rect) -> Self {
+        Self {
+            id,
+            price_scale,
+            height_stretch: 1.0,
+            layout_rect,
+        }
+    }
+}
+
 /// Full mutable chart state — owns the model+view state
 pub struct ChartState {
     pub data: ChartData,
     pub time_scale: TimeScale,
-    pub price_scale: PriceScale,
+    pub panes: Vec<PaneState>,
     pub layout: ChartLayout,
     pub crosshair: Crosshair,
     pub drag: DragState,
@@ -137,6 +157,9 @@ pub struct ChartState {
 
     /// Pending events from the last interaction call
     pub pending_events: InteractionEvents,
+
+    /// Counter for auto-incrementing pane IDs
+    next_pane_id: u32,
 }
 
 impl ChartState {
@@ -154,11 +177,12 @@ impl ChartState {
         let layout = ChartLayout::new(width, height, scale_factor);
         let time_scale = TimeScale::new(data.bars.len(), layout.plot_area.width);
         let price_scale = PriceScale::from_data(&data.bars);
+        let panes = vec![PaneState::new(0, price_scale, layout.plot_area)];
 
-        ChartState {
+        let mut state = ChartState {
             data,
             time_scale,
-            price_scale,
+            panes,
             layout,
             crosshair: Crosshair::default(),
             drag: DragState::default(),
@@ -173,21 +197,243 @@ impl ChartState {
             y_axis_drag_start_range: None,
             x_axis_drag_start_spacing: None,
             pending_events: InteractionEvents::default(),
-        }
+            next_pane_id: 1, // pane 0 is already created
+        };
+        state.update_panes_layout();
+        state
     }
 
     /// Recalculate layout after resize
     pub fn resize(&mut self, width: f32, height: f32, scale_factor: f64) {
         self.layout = ChartLayout::new(width, height, scale_factor);
+        self.update_panes_layout();
         self.update_price_scale();
     }
 
-    /// Update price scale to fit visible data
+    /// Distributes total plot_area height among the panes based on stretch
+    pub fn update_panes_layout(&mut self) {
+        let total_stretch: f32 = self.panes.iter().map(|p| p.height_stretch).sum();
+        if total_stretch == 0.0 {
+            return;
+        }
+
+        // Between panes, we could leave a 1 or 2 pixel gap. Let's do 1px for now,
+        // or just no gap since we can draw a separator.
+        let num_panes = self.panes.len() as f32;
+        let gap = 1.0;
+        let available_height = self.layout.plot_area.height - (gap * (num_panes - 1.0).max(0.0));
+
+        let mut current_y = self.layout.plot_area.y;
+
+        for pane in &mut self.panes {
+            let pane_height = available_height * (pane.height_stretch / total_stretch);
+            pane.layout_rect = crate::chart_model::Rect {
+                x: self.layout.plot_area.x,
+                y: current_y,
+                width: self.layout.plot_area.width,
+                height: pane_height,
+            };
+            current_y += pane_height + gap;
+        }
+    }
+
+    /// Update price scale to fit visible data for all panes
     pub fn update_price_scale(&mut self) {
         let (first, last) = self.time_scale.visible_range(self.layout.plot_area.width);
-        if first < last && last <= self.data.bars.len() {
-            self.price_scale = PriceScale::from_data(&self.data.bars[first..last]);
+        if first >= last || last > self.data.bars.len() {
+            return;
         }
+
+        // We need to calculate auto-scale bounds for EACH pane based on the series assigned to it
+        for (i, pane) in self.panes.iter_mut().enumerate() {
+            // Find all series belonging to this pane
+            let mut has_series = false;
+            let mut min_val = f64::INFINITY;
+            let mut max_val = f64::NEG_INFINITY;
+
+            // Optional: If this is pane 0 and no series exist, it should still scale to the main OHLC data layer for backward compatibility
+            if i == 0 {
+                let main_ps = PriceScale::from_data(&self.data.bars[first..last]);
+                min_val = main_ps.min_price;
+                max_val = main_ps.max_price;
+                has_series = true;
+            }
+
+            for series in self.series.series.iter() {
+                if series.pane_index == i && series.visible {
+                    let series_min_max = match &series.data {
+                        crate::series::SeriesData::Line(pts) => {
+                            let mut s_min = f64::INFINITY;
+                            let mut s_max = f64::NEG_INFINITY;
+
+                            // Naive iteration - optimize later
+                            let start_time = self.data.bars[first].time;
+                            let end_time = self.data.bars[last - 1].time;
+
+                            for pt in pts.iter() {
+                                if pt.time >= start_time && pt.time <= end_time {
+                                    s_min = s_min.min(pt.value);
+                                    s_max = s_max.max(pt.value);
+                                }
+                            }
+                            if s_min <= s_max {
+                                Some((s_min, s_max))
+                            } else {
+                                None
+                            }
+                        }
+                        crate::series::SeriesData::Ohlc(bars) => {
+                            let mut s_min = f64::INFINITY;
+                            let mut s_max = f64::NEG_INFINITY;
+                            let start_time = self.data.bars[first].time;
+                            let end_time = self.data.bars[last - 1].time;
+                            for b in bars.iter() {
+                                if b.time >= start_time && b.time <= end_time {
+                                    s_min = s_min.min(b.low);
+                                    s_max = s_max.max(b.high);
+                                }
+                            }
+                            if s_min <= s_max {
+                                Some((s_min, s_max))
+                            } else {
+                                None
+                            }
+                        }
+                        crate::series::SeriesData::Histogram(pts) => {
+                            let mut s_min = f64::INFINITY;
+                            let mut s_max = f64::NEG_INFINITY;
+                            let start_time = self.data.bars[first].time;
+                            let end_time = self.data.bars[last - 1].time;
+                            for pt in pts.iter() {
+                                if pt.time >= start_time && pt.time <= end_time {
+                                    // Histogram scale typically includes 0
+                                    s_min = s_min.min(0.0).min(pt.value);
+                                    // Make sure max is at least above 0 or slightly above min to avoid flat scale
+                                    s_max = s_max.max(0.0).max(pt.value);
+                                }
+                            }
+                            if s_min <= s_max {
+                                Some((s_min, s_max))
+                            } else {
+                                None
+                            }
+                        }
+                    };
+
+                    if let Some((s_min, s_max)) = series_min_max {
+                        min_val = min_val.min(s_min);
+                        max_val = max_val.max(s_max);
+                        has_series = true;
+                    }
+                }
+            }
+
+            if has_series {
+                // Add margins like PriceScale::from_data does (5% margin)
+                let range = max_val - min_val;
+                let margin = if range == 0.0 { 1.0 } else { range * 0.05 };
+                pane.price_scale.min_price = min_val - margin;
+                pane.price_scale.max_price = max_val + margin;
+            }
+        }
+    }
+
+    /// Add a new pane to the chart. Returns the pane ID.
+    /// `height_stretch` controls how much vertical space this pane gets relative to others.
+    pub fn add_pane(&mut self, height_stretch: f32) -> u32 {
+        let id = self.next_pane_id;
+        self.next_pane_id += 1;
+        let price_scale = PriceScale::from_data(&[]);
+        let pane = PaneState {
+            id,
+            price_scale,
+            height_stretch,
+            layout_rect: crate::chart_model::Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.0,
+                height: 0.0,
+            },
+        };
+        self.panes.push(pane);
+        self.update_panes_layout();
+        self.update_price_scale();
+        id
+    }
+
+    /// Remove a pane by ID. Returns true if the pane was found and removed.
+    /// Pane 0 (the main pane) cannot be removed.
+    /// Any series assigned to this pane are moved back to pane 0.
+    pub fn remove_pane(&mut self, pane_id: u32) -> bool {
+        if pane_id == 0 {
+            return false;
+        }
+        let idx = self.panes.iter().position(|p| p.id == pane_id);
+        if let Some(idx) = idx {
+            self.panes.remove(idx);
+            // Move orphaned series back to pane 0
+            for series in &mut self.series.series {
+                if series.pane_index == idx {
+                    series.pane_index = 0;
+                } else if series.pane_index > idx {
+                    series.pane_index -= 1;
+                }
+            }
+            self.update_panes_layout();
+            self.update_price_scale();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move a series to a specific pane (by pane ID).
+    /// Returns true if both the series and pane were found.
+    pub fn move_series_to_pane(&mut self, series_id: u32, pane_id: u32) -> bool {
+        let pane_idx = self.panes.iter().position(|p| p.id == pane_id);
+        if let Some(pane_idx) = pane_idx {
+            if let Some(series) = self.series.get_mut(series_id) {
+                series.pane_index = pane_idx;
+                self.update_price_scale();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Swap two panes by their IDs. Returns true if both were found and swapped.
+    pub fn swap_panes(&mut self, pane_id_a: u32, pane_id_b: u32) -> bool {
+        let idx_a = self.panes.iter().position(|p| p.id == pane_id_a);
+        let idx_b = self.panes.iter().position(|p| p.id == pane_id_b);
+        if let (Some(a), Some(b)) = (idx_a, idx_b) {
+            self.panes.swap(a, b);
+            // Update series pane_index references
+            for series in &mut self.series.series {
+                if series.pane_index == a {
+                    series.pane_index = b;
+                } else if series.pane_index == b {
+                    series.pane_index = a;
+                }
+            }
+            self.update_panes_layout();
+            self.update_price_scale();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get the layout rect (x, y, width, height) for a pane by ID.
+    /// Returns None if the pane doesn't exist.
+    pub fn pane_size(&self, pane_id: u32) -> Option<(f32, f32, f32, f32)> {
+        self.panes.iter().find(|p| p.id == pane_id).map(|p| {
+            (
+                p.layout_rect.x,
+                p.layout_rect.y,
+                p.layout_rect.width,
+                p.layout_rect.height,
+            )
+        })
     }
 
     /// Determine which zone a point is in
@@ -226,7 +472,11 @@ impl ChartState {
             self.crosshair.bar_index = self
                 .time_scale
                 .x_to_nearest_index(x, &self.layout.plot_area);
-            self.crosshair.price = Some(self.price_scale.y_to_price(y, &self.layout.plot_area));
+            self.crosshair.price = Some(
+                self.panes[0]
+                    .price_scale
+                    .y_to_price(y, &self.panes[0].layout_rect),
+            );
 
             // Handle drag panning (plot area drag)
             if self.drag.active {
@@ -314,8 +564,10 @@ impl ChartState {
 
             // Save price scale range for Y-axis drag zoom
             if zone == HitZone::YAxis {
-                self.y_axis_drag_start_range =
-                    Some((self.price_scale.min_price, self.price_scale.max_price));
+                self.y_axis_drag_start_range = Some((
+                    self.panes[0].price_scale.min_price,
+                    self.panes[0].price_scale.max_price,
+                ));
             }
             // Save bar spacing for X-axis drag zoom
             if zone == HitZone::XAxis {
@@ -344,7 +596,11 @@ impl ChartState {
                     .time_scale
                     .x_to_nearest_index(x, &self.layout.plot_area),
                 price: if self.layout.plot_area_contains(x, y) {
-                    Some(self.price_scale.y_to_price(y, &self.layout.plot_area))
+                    Some(
+                        self.panes[0]
+                            .price_scale
+                            .y_to_price(y, &self.panes[0].layout_rect),
+                    )
                 } else {
                     None
                 },
@@ -408,6 +664,45 @@ impl ChartState {
             });
         }
 
+        was_visible
+    }
+
+    /// Programmatically set crosshair position
+    pub fn set_crosshair_position(&mut self, price: f64, time: i64, _series_id: u32) -> bool {
+        // Find index for the given time
+        let idx = match self.data.bars.binary_search_by_key(&time, |b| b.time) {
+            Ok(i) => i, // Exact match
+            Err(i) => {
+                if i < self.data.bars.len() {
+                    i
+                } else {
+                    self.data.bars.len().saturating_sub(1)
+                }
+            }
+        };
+
+        if self.data.bars.is_empty() {
+            return false;
+        }
+
+        let x = self.time_scale.index_to_x(idx, &self.layout.plot_area);
+        let y = self.panes[0]
+            .price_scale
+            .price_to_y(price, &self.panes[0].layout_rect);
+
+        self.crosshair.x = x;
+        self.crosshair.y = y;
+        self.crosshair.visible = true;
+        self.crosshair.price = Some(price);
+        self.crosshair.bar_index = Some(idx);
+
+        true
+    }
+
+    /// Programmatically clear crosshair position
+    pub fn clear_crosshair_position(&mut self) -> bool {
+        let was_visible = self.crosshair.visible;
+        self.crosshair.visible = false;
         was_visible
     }
 
@@ -488,8 +783,8 @@ impl ChartState {
             let factor = factor.clamp(0.1, 10.0);
             let mid = (orig_min + orig_max) / 2.0;
             let new_half = range * factor / 2.0;
-            self.price_scale.min_price = mid - new_half;
-            self.price_scale.max_price = mid + new_half;
+            self.panes[0].price_scale.min_price = mid - new_half;
+            self.panes[0].price_scale.max_price = mid + new_half;
         }
     }
 
@@ -766,12 +1061,13 @@ mod tests {
         let mut state = make_state();
         let ax = state.layout.plot_area.x + state.layout.plot_area.width + 10.0;
         let ay = state.layout.plot_area.y + state.layout.plot_area.height / 2.0;
-        let orig_range = state.price_scale.max_price - state.price_scale.min_price;
+        let orig_range =
+            state.panes[0].price_scale.max_price - state.panes[0].price_scale.min_price;
 
         state.pointer_down(ax, ay, 0);
         // Drag down → should zoom out (expand range)
         state.pointer_move(ax, ay + 50.0);
-        let new_range = state.price_scale.max_price - state.price_scale.min_price;
+        let new_range = state.panes[0].price_scale.max_price - state.panes[0].price_scale.min_price;
         assert!(
             new_range > orig_range,
             "Range should expand: {} > {}",
@@ -808,9 +1104,10 @@ mod tests {
         let ay = state.layout.plot_area.y + state.layout.plot_area.height / 2.0;
 
         // Manually expand price range
-        state.price_scale.min_price -= 50.0;
-        state.price_scale.max_price += 50.0;
-        let expanded_range = state.price_scale.max_price - state.price_scale.min_price;
+        state.panes[0].price_scale.min_price -= 50.0;
+        state.panes[0].price_scale.max_price += 50.0;
+        let expanded_range =
+            state.panes[0].price_scale.max_price - state.panes[0].price_scale.min_price;
 
         // Double click on Y-axis
         state.pointer_down(ax, ay, 0);
@@ -822,7 +1119,8 @@ mod tests {
         state.pointer_up(ax, ay, 0);
 
         // Should have reset (auto-fit to visible data)
-        let reset_range = state.price_scale.max_price - state.price_scale.min_price;
+        let reset_range =
+            state.panes[0].price_scale.max_price - state.panes[0].price_scale.min_price;
         assert!(
             reset_range < expanded_range,
             "Range should shrink: {} < {}",
@@ -1009,5 +1307,286 @@ mod tests {
         let needs_redraw = state.apply_options(new_opts);
         assert!(needs_redraw);
         assert_eq!(state.format_price(123.4), "$123.4000");
+    }
+
+    #[test]
+    fn test_add_pane() {
+        let mut state = make_state();
+        assert_eq!(state.panes.len(), 1);
+        let pane_id = state.add_pane(1.0);
+        assert_eq!(state.panes.len(), 2);
+        assert_eq!(pane_id, 1);
+        // Second pane should have a non-zero layout rect
+        assert!(state.panes[1].layout_rect.height > 0.0);
+    }
+
+    #[test]
+    fn test_remove_pane() {
+        let mut state = make_state();
+        let pane_id = state.add_pane(1.0);
+        assert_eq!(state.panes.len(), 2);
+        let removed = state.remove_pane(pane_id);
+        assert!(removed);
+        assert_eq!(state.panes.len(), 1);
+    }
+
+    #[test]
+    fn test_cannot_remove_main_pane() {
+        let mut state = make_state();
+        let removed = state.remove_pane(0);
+        assert!(!removed);
+        assert_eq!(state.panes.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_pane() {
+        let mut state = make_state();
+        let removed = state.remove_pane(999);
+        assert!(!removed);
+    }
+
+    #[test]
+    fn test_pane_layout_splits_height() {
+        let mut state = make_state();
+        let full_height = state.panes[0].layout_rect.height;
+        let _pane_id = state.add_pane(1.0); // equal stretch
+                                            // With 1px gap, each pane should be roughly (full_height - 1) / 2
+        let half = (full_height - 1.0) / 2.0;
+        assert!((state.panes[0].layout_rect.height - half).abs() < 1.0);
+        assert!((state.panes[1].layout_rect.height - half).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_move_series_to_pane() {
+        let mut state = make_state();
+        let series_id = state.series.add(crate::series::Series::line(0, vec![]));
+        let pane_id = state.add_pane(1.0);
+
+        let moved = state.move_series_to_pane(series_id, pane_id);
+        assert!(moved);
+        assert_eq!(state.series.get(series_id).unwrap().pane_index, 1);
+    }
+
+    #[test]
+    fn test_remove_pane_moves_series_back() {
+        let mut state = make_state();
+        let series_id = state.series.add(crate::series::Series::line(0, vec![]));
+        let pane_id = state.add_pane(1.0);
+        state.move_series_to_pane(series_id, pane_id);
+        assert_eq!(state.series.get(series_id).unwrap().pane_index, 1);
+
+        state.remove_pane(pane_id);
+        // Series should be back in pane 0
+        assert_eq!(state.series.get(series_id).unwrap().pane_index, 0);
+    }
+
+    #[test]
+    fn test_unequal_height_stretch() {
+        let mut state = make_state();
+        let full_height = state.panes[0].layout_rect.height;
+        // Pane 0 has stretch 1.0, new pane has stretch 2.0
+        // Total stretch = 3.0, so pane 0 gets 1/3, pane 1 gets 2/3
+        let _pane_id = state.add_pane(2.0);
+        let available = full_height - 1.0; // minus 1px gap
+        let expected_pane0 = available / 3.0;
+        let expected_pane1 = available * 2.0 / 3.0;
+        assert!((state.panes[0].layout_rect.height - expected_pane0).abs() < 1.0);
+        assert!((state.panes[1].layout_rect.height - expected_pane1).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_sequential_pane_ids() {
+        let mut state = make_state();
+        let id1 = state.add_pane(1.0);
+        let id2 = state.add_pane(1.0);
+        let id3 = state.add_pane(1.0);
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+        assert_eq!(id3, 3);
+        // Remove middle pane — IDs should not be reused
+        state.remove_pane(id2);
+        let id4 = state.add_pane(1.0);
+        assert_eq!(id4, 4); // not 2
+    }
+
+    #[test]
+    fn test_move_series_to_nonexistent_pane() {
+        let mut state = make_state();
+        let series_id = state.series.add(crate::series::Series::line(0, vec![]));
+        let moved = state.move_series_to_pane(series_id, 999);
+        assert!(!moved);
+        assert_eq!(state.series.get(series_id).unwrap().pane_index, 0);
+    }
+
+    #[test]
+    fn test_move_nonexistent_series_to_pane() {
+        let mut state = make_state();
+        let pane_id = state.add_pane(1.0);
+        let moved = state.move_series_to_pane(999, pane_id);
+        assert!(!moved);
+    }
+
+    #[test]
+    fn test_pane_y_positions_stack_vertically() {
+        let mut state = make_state();
+        let _p1 = state.add_pane(1.0);
+        let _p2 = state.add_pane(1.0);
+
+        // Pane 0 starts at the top of the plot area
+        assert_eq!(state.panes[0].layout_rect.y, state.layout.plot_area.y);
+        // Pane 1 starts after pane 0 + gap
+        let expected_y1 = state.panes[0].layout_rect.y + state.panes[0].layout_rect.height + 1.0;
+        assert!((state.panes[1].layout_rect.y - expected_y1).abs() < 0.5);
+        // Pane 2 starts after pane 1 + gap
+        let expected_y2 = state.panes[1].layout_rect.y + state.panes[1].layout_rect.height + 1.0;
+        assert!((state.panes[2].layout_rect.y - expected_y2).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_resize_updates_all_pane_layouts() {
+        let mut state = make_state();
+        let _p1 = state.add_pane(1.0);
+        assert_eq!(state.panes.len(), 2);
+
+        state.resize(1200.0, 800.0, 2.0);
+        // After resize, both panes should have updated layout rects
+        assert!(state.panes[0].layout_rect.width > 0.0);
+        assert!(state.panes[1].layout_rect.width > 0.0);
+        // They should share the plot area width
+        assert_eq!(
+            state.panes[0].layout_rect.width,
+            state.panes[1].layout_rect.width
+        );
+    }
+
+    #[test]
+    fn test_pane_price_scale_isolation() {
+        // When a series is in pane 1, only pane 1's price scale should reflect its range
+        let mut state = make_state();
+        let pane_id = state.add_pane(1.0);
+
+        // Record pane 0's scale bounds (from main OHLC data)
+        let p0_min_before = state.panes[0].price_scale.min_price;
+        let p0_max_before = state.panes[0].price_scale.max_price;
+
+        // Add a series with very different price range and move it to pane 1
+        let pts = vec![
+            crate::series::LineDataPoint {
+                time: state.data.bars[0].time,
+                value: 50000.0,
+            },
+            crate::series::LineDataPoint {
+                time: state.data.bars[1].time,
+                value: 60000.0,
+            },
+        ];
+        let series_id = state.series.add(crate::series::Series::line(0, pts));
+        state.move_series_to_pane(series_id, pane_id);
+
+        // Pane 0 scale should be unchanged (main OHLC data stays there)
+        assert!((state.panes[0].price_scale.min_price - p0_min_before).abs() < 0.01);
+        assert!((state.panes[0].price_scale.max_price - p0_max_before).abs() < 0.01);
+
+        // Pane 1 scale should reflect the 50000-60000 range
+        assert!(state.panes[1].price_scale.min_price < 51000.0);
+        assert!(state.panes[1].price_scale.max_price > 59000.0);
+    }
+
+    #[test]
+    fn test_single_pane_layout_matches_plot_area() {
+        // With only one pane, its layout_rect should match the full plot area
+        let state = make_state();
+        assert_eq!(state.panes.len(), 1);
+        assert_eq!(state.panes[0].layout_rect.x, state.layout.plot_area.x);
+        assert_eq!(state.panes[0].layout_rect.y, state.layout.plot_area.y);
+        assert_eq!(
+            state.panes[0].layout_rect.width,
+            state.layout.plot_area.width
+        );
+        assert_eq!(
+            state.panes[0].layout_rect.height,
+            state.layout.plot_area.height
+        );
+    }
+
+    #[test]
+    fn test_crosshair_price_uses_pane_rect() {
+        // This test verifies that pointer_move produces the correct price
+        // when using a single pane, confirming the fix from the audit
+        let mut state = make_state();
+        let pane_rect = state.panes[0].layout_rect;
+
+        // Move crosshair to the middle of the pane
+        let mid_x = pane_rect.x + pane_rect.width / 2.0;
+        let mid_y = pane_rect.y + pane_rect.height / 2.0;
+        state.pointer_move(mid_x, mid_y);
+
+        // The price should be approximately the midpoint of the price scale
+        let expected_mid_price =
+            (state.panes[0].price_scale.min_price + state.panes[0].price_scale.max_price) / 2.0;
+        let actual_price = state.crosshair.price.unwrap();
+        let tolerance =
+            (state.panes[0].price_scale.max_price - state.panes[0].price_scale.min_price) * 0.1; // 10% tolerance
+        assert!(
+            (actual_price - expected_mid_price).abs() < tolerance,
+            "Expected price ~{:.2}, got {:.2}",
+            expected_mid_price,
+            actual_price
+        );
+    }
+
+    #[test]
+    fn test_swap_panes() {
+        let mut state = make_state();
+        let p1 = state.add_pane(1.0);
+        let p2 = state.add_pane(2.0);
+        // p1 is at index 1, p2 is at index 2
+        let h1_before = state.panes[1].layout_rect.height;
+        let h2_before = state.panes[2].layout_rect.height;
+        assert!(h2_before > h1_before); // p2 has double stretch
+
+        let swapped = state.swap_panes(p1, p2);
+        assert!(swapped);
+        // After swap: pane at index 1 now has p2's stretch (2.0), index 2 has p1's stretch (1.0)
+        assert!(state.panes[1].layout_rect.height > state.panes[2].layout_rect.height);
+    }
+
+    #[test]
+    fn test_swap_panes_invalid() {
+        let mut state = make_state();
+        let result = state.swap_panes(0, 999);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_pane_size() {
+        let state = make_state();
+        let size = state.pane_size(0);
+        assert!(size.is_some());
+        let (x, y, w, h) = size.unwrap();
+        assert_eq!(x, state.layout.plot_area.x);
+        assert_eq!(y, state.layout.plot_area.y);
+        assert!(w > 0.0);
+        assert!(h > 0.0);
+    }
+
+    #[test]
+    fn test_pane_size_nonexistent() {
+        let state = make_state();
+        assert!(state.pane_size(999).is_none());
+    }
+
+    #[test]
+    fn test_swap_panes_updates_series_indices() {
+        let mut state = make_state();
+        let p1 = state.add_pane(1.0);
+        let p2 = state.add_pane(1.0);
+        let series_id = state.series.add(crate::series::Series::line(0, vec![]));
+        state.move_series_to_pane(series_id, p1);
+        assert_eq!(state.series.get(series_id).unwrap().pane_index, 1);
+
+        state.swap_panes(p1, p2);
+        // Series should now be at index 2 (where p1 moved to)
+        assert_eq!(state.series.get(series_id).unwrap().pane_index, 2);
     }
 }

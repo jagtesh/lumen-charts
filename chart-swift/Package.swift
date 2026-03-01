@@ -9,9 +9,14 @@ let package = Package(
             name: "CChartCore",
             path: "Sources/CChartCore"
         ),
+        .target(
+            name: "LightweightCharts",
+            dependencies: ["CChartCore"],
+            path: "Sources/LightweightCharts"
+        ),
         .executableTarget(
             name: "ChartDemo",
-            dependencies: ["CChartCore"],
+            dependencies: ["CChartCore", "LightweightCharts"],
             path: "Sources/ChartDemo",
             linkerSettings: [
                 .unsafeFlags([

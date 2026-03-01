@@ -1,7 +1,11 @@
-/target/
-Cargo.lock
-.build/
-.swiftpm/
+**/target/
+**/.build/
+**/.swiftpm/
 *.o
 *.d
 *.dylib
+Cargo.lock
+pkg/
+www_pkg/
+node_modules/
+.DS_Store

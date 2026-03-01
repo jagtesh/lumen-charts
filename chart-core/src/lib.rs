@@ -25,6 +25,18 @@ mod native {
     use vello::wgpu;
     use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
 
+    #[repr(C)]
+    pub struct ChartEventParam {
+        pub time: i64,
+        pub logical: f64,
+        pub point_x: f32,
+        pub point_y: f32,
+        pub price: f64,
+    }
+
+    pub type ChartEventCallback =
+        extern "C" fn(param: *const ChartEventParam, user_data: *mut c_void);
+
     /// Opaque chart handle passed via C-ABI
     pub struct Chart {
         state: ChartState,
@@ -34,6 +46,10 @@ mod native {
         surface: wgpu::Surface<'static>,
         surface_config: wgpu::SurfaceConfiguration,
         vello_renderer: VelloRenderer,
+
+        click_cb: Option<(ChartEventCallback, *mut c_void)>,
+        crosshair_move_cb: Option<(ChartEventCallback, *mut c_void)>,
+        dbl_click_cb: Option<(ChartEventCallback, *mut c_void)>,
     }
 
     // ----- Lifecycle -----
@@ -120,6 +136,9 @@ mod native {
             surface,
             surface_config,
             vello_renderer,
+            click_cb: None,
+            crosshair_move_cb: None,
+            dbl_click_cb: None,
         };
 
         Box::into_raw(Box::new(chart))
@@ -204,7 +223,36 @@ mod native {
             assert!(!chart.is_null());
             &mut *chart
         };
-        chart.state.pointer_move(x, y)
+        let redraw = chart.state.pointer_move(x, y);
+
+        if let Some((cb, user_data)) = chart.crosshair_move_cb {
+            let logical = chart
+                .state
+                .time_scale
+                .x_to_index(x, &chart.state.layout.plot_area);
+            let nearest_idx = chart
+                .state
+                .time_scale
+                .x_to_nearest_index(x, &chart.state.layout.plot_area);
+            let time = nearest_idx
+                .and_then(|i| chart.state.data.bars.get(i))
+                .map(|b| b.time)
+                .unwrap_or(0);
+            let price = chart.state.panes[0]
+                .price_scale
+                .y_to_price(y, &chart.state.panes[0].layout_rect);
+
+            let param = ChartEventParam {
+                time,
+                logical: logical as f64,
+                point_x: x,
+                point_y: y,
+                price,
+            };
+            cb(&param, user_data);
+        }
+
+        redraw
     }
 
     #[no_mangle]
@@ -222,7 +270,136 @@ mod native {
             assert!(!chart.is_null());
             &mut *chart
         };
-        chart.state.pointer_up(x, y, button)
+        let redraw = chart.state.pointer_up(x, y, button);
+
+        if chart.state.pending_events.click.is_some() {
+            if let Some((cb, user_data)) = chart.click_cb {
+                let logical = chart
+                    .state
+                    .time_scale
+                    .x_to_index(x, &chart.state.layout.plot_area);
+                let nearest_idx = chart
+                    .state
+                    .time_scale
+                    .x_to_nearest_index(x, &chart.state.layout.plot_area);
+                let time = nearest_idx
+                    .and_then(|i| chart.state.data.bars.get(i))
+                    .map(|b| b.time)
+                    .unwrap_or(0);
+                let price = chart.state.panes[0]
+                    .price_scale
+                    .y_to_price(y, &chart.state.panes[0].layout_rect);
+
+                let param = ChartEventParam {
+                    time,
+                    logical: logical as f64,
+                    point_x: x,
+                    point_y: y,
+                    price,
+                };
+                cb(&param, user_data);
+            }
+            chart.state.pending_events.click = None;
+        }
+
+        // Dispatch dbl_click callback
+        if chart.state.pending_events.dbl_click.is_some() {
+            if let Some((cb, user_data)) = chart.dbl_click_cb {
+                let logical = chart
+                    .state
+                    .time_scale
+                    .x_to_index(x, &chart.state.layout.plot_area);
+                let nearest_idx = chart
+                    .state
+                    .time_scale
+                    .x_to_nearest_index(x, &chart.state.layout.plot_area);
+                let time = nearest_idx
+                    .and_then(|i| chart.state.data.bars.get(i))
+                    .map(|b| b.time)
+                    .unwrap_or(0);
+                let price = chart.state.panes[0]
+                    .price_scale
+                    .y_to_price(y, &chart.state.panes[0].layout_rect);
+
+                let param = ChartEventParam {
+                    time,
+                    logical: logical as f64,
+                    point_x: x,
+                    point_y: y,
+                    price,
+                };
+                cb(&param, user_data);
+            }
+            chart.state.pending_events.dbl_click = None;
+        }
+
+        redraw
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_subscribe_click(
+        chart: *mut Chart,
+        callback: ChartEventCallback,
+        user_data: *mut std::ffi::c_void,
+    ) {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.click_cb = Some((callback, user_data));
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_unsubscribe_click(chart: *mut Chart) {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.click_cb = None;
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_subscribe_dbl_click(
+        chart: *mut Chart,
+        callback: ChartEventCallback,
+        user_data: *mut std::ffi::c_void,
+    ) {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.dbl_click_cb = Some((callback, user_data));
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_unsubscribe_dbl_click(chart: *mut Chart) {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.dbl_click_cb = None;
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_subscribe_crosshair_move(
+        chart: *mut Chart,
+        callback: ChartEventCallback,
+        user_data: *mut std::ffi::c_void,
+    ) {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.crosshair_move_cb = Some((callback, user_data));
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_unsubscribe_crosshair_move(chart: *mut Chart) {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.crosshair_move_cb = None;
     }
 
     #[no_mangle]
@@ -232,6 +409,29 @@ mod native {
             &mut *chart
         };
         chart.state.pointer_leave()
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_set_crosshair_position(
+        chart: *mut Chart,
+        price: f64,
+        time: i64,
+        series_id: u32,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.set_crosshair_position(price, time, series_id)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_clear_crosshair_position(chart: *mut Chart) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.clear_crosshair_position()
     }
 
     #[no_mangle]
@@ -345,6 +545,103 @@ mod native {
         true
     }
 
+    /// Update or insert a single OHLC bar for a specific series.
+    #[no_mangle]
+    pub extern "C" fn chart_series_update_ohlc_bar(
+        chart: *mut Chart,
+        series_id: u32,
+        time: i64,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get_mut(series_id) {
+            series.data.update_ohlc(crate::chart_model::OhlcBar {
+                time,
+                open,
+                high,
+                low,
+                close,
+            });
+            return true;
+        }
+        false
+    }
+
+    /// Update or insert a single line/area/baseline point for a specific series.
+    #[no_mangle]
+    pub extern "C" fn chart_series_update_line_bar(
+        chart: *mut Chart,
+        series_id: u32,
+        time: i64,
+        value: f64,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get_mut(series_id) {
+            series
+                .data
+                .update_line(crate::series::LineDataPoint { time, value });
+            return true;
+        }
+        false
+    }
+
+    /// Update or insert a single histogram bar for a specific series.
+    #[no_mangle]
+    pub extern "C" fn chart_series_update_histogram_bar(
+        chart: *mut Chart,
+        series_id: u32,
+        time: i64,
+        value: f64,
+        color_rgba: u32,
+        has_color: bool,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get_mut(series_id) {
+            let color = if has_color {
+                let bytes = color_rgba.to_be_bytes();
+                Some([
+                    bytes[0] as f32 / 255.0,
+                    bytes[1] as f32 / 255.0,
+                    bytes[2] as f32 / 255.0,
+                    bytes[3] as f32 / 255.0,
+                ])
+            } else {
+                None
+            };
+            series
+                .data
+                .update_histogram(crate::series::HistogramDataPoint { time, value, color });
+            return true;
+        }
+        false
+    }
+
+    /// Remove `count` data items from the end of a series.
+    #[no_mangle]
+    pub extern "C" fn chart_series_pop(chart: *mut Chart, series_id: u32, count: u32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get_mut(series_id) {
+            series.data.pop(count as usize);
+            return true;
+        }
+        false
+    }
+
     /// Get the number of bars.
     #[no_mangle]
     pub extern "C" fn chart_bar_count(chart: *mut Chart) -> u32 {
@@ -372,6 +669,507 @@ mod native {
             _ => return false,
         };
         true
+    }
+
+    /// Apply options to the chart globally from a JSON string.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_apply_options(
+        chart: *mut Chart,
+        json_cstr: *const std::os::raw::c_char,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if json_cstr.is_null() {
+            return false;
+        }
+        let json_str = unsafe { std::ffi::CStr::from_ptr(json_cstr) }.to_string_lossy();
+
+        if chart.state.options.apply_json(&json_str) {
+            chart.state.update_price_scale();
+            return true;
+        }
+        false
+    }
+
+    /// Apply options to a specific series from a JSON string.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_series_apply_options(
+        chart: *mut Chart,
+        series_id: u32,
+        json_cstr: *const std::os::raw::c_char,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if json_cstr.is_null() {
+            return false;
+        }
+        let json_str = unsafe { std::ffi::CStr::from_ptr(json_cstr) }.to_string_lossy();
+
+        if let Some(series) = chart.state.series.get_mut(series_id) {
+            return series.apply_options_json(&json_str);
+        }
+        false
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_series_create_price_line(
+        chart: *mut Chart,
+        series_id: u32,
+        options_json_cstr: *const std::os::raw::c_char,
+    ) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get_mut(series_id) {
+            let mut opts = crate::series::PriceLineOptions::default();
+            if !options_json_cstr.is_null() {
+                let json_str =
+                    unsafe { std::ffi::CStr::from_ptr(options_json_cstr) }.to_string_lossy();
+                if let Ok(partial) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    if let Ok(mut full) = serde_json::to_value(&opts) {
+                        crate::chart_options::merge_json(&mut full, partial);
+                        if let Ok(new_opts) = serde_json::from_value(full) {
+                            opts = new_opts;
+                        }
+                    }
+                }
+            }
+            return series.add_price_line(opts);
+        }
+        u32::MAX
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_series_remove_price_line(
+        chart: *mut Chart,
+        series_id: u32,
+        line_id: u32,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get_mut(series_id) {
+            return series.remove_price_line(line_id);
+        }
+        false
+    }
+
+    // ----- Read & Coordinate Translation APIs -----
+
+    #[no_mangle]
+    pub extern "C" fn chart_price_to_coordinate(chart: *mut Chart, price: f64) -> f32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.panes[0]
+            .price_scale
+            .price_to_y(price, &chart.state.panes[0].layout_rect)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_coordinate_to_price(chart: *mut Chart, y: f32) -> f64 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.panes[0]
+            .price_scale
+            .y_to_price(y, &chart.state.panes[0].layout_rect)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_logical_to_coordinate(chart: *mut Chart, logical: f64) -> f32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart
+            .state
+            .time_scale
+            .logical_to_x(logical as f32, &chart.state.layout.plot_area)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_coordinate_to_logical(chart: *mut Chart, x: f32) -> f64 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart
+            .state
+            .time_scale
+            .x_to_index(x, &chart.state.layout.plot_area) as f64
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_time_to_coordinate(chart: *mut Chart, time: i64) -> f32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let idx = match chart
+            .state
+            .data
+            .bars
+            .binary_search_by_key(&time, |b| b.time)
+        {
+            Ok(i) => i as f32,
+            Err(i) => {
+                if i < chart.state.data.bars.len() {
+                    i as f32
+                } else {
+                    chart.state.data.bars.len().saturating_sub(1) as f32
+                }
+            }
+        };
+        chart
+            .state
+            .time_scale
+            .logical_to_x(idx, &chart.state.layout.plot_area)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_coordinate_to_time(chart: *mut Chart, x: f32) -> i64 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(idx) = chart
+            .state
+            .time_scale
+            .x_to_nearest_index(x, &chart.state.layout.plot_area)
+        {
+            if let Some(b) = chart.state.data.bars.get(idx) {
+                return b.time;
+            }
+        }
+        0
+    }
+
+    // ----- Data Retrieval APIs -----
+
+    #[no_mangle]
+    pub extern "C" fn chart_series_data_length(chart: *mut Chart, series_id: u32) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get(series_id) {
+            match &series.data {
+                crate::series::SeriesData::Ohlc(bars) => bars.len() as u32,
+                crate::series::SeriesData::Line(pts) => pts.len() as u32,
+                crate::series::SeriesData::Histogram(pts) => pts.len() as u32,
+            }
+        } else {
+            0
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_series_get_ohlc_data(
+        chart: *mut Chart,
+        series_id: u32,
+        times: *mut i64,
+        opens: *mut f64,
+        highs: *mut f64,
+        lows: *mut f64,
+        closes: *mut f64,
+        max_count: u32,
+    ) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get(series_id) {
+            if let crate::series::SeriesData::Ohlc(bars) = &series.data {
+                let count = (max_count as usize).min(bars.len());
+                unsafe {
+                    let mut times = times;
+                    let mut opens = opens;
+                    let mut highs = highs;
+                    let mut lows = lows;
+                    let mut closes = closes;
+                    for i in 0..count {
+                        if !times.is_null() {
+                            *times = bars[i].time;
+                            times = times.add(1);
+                        }
+                        if !opens.is_null() {
+                            *opens = bars[i].open;
+                            opens = opens.add(1);
+                        }
+                        if !highs.is_null() {
+                            *highs = bars[i].high;
+                            highs = highs.add(1);
+                        }
+                        if !lows.is_null() {
+                            *lows = bars[i].low;
+                            lows = lows.add(1);
+                        }
+                        if !closes.is_null() {
+                            *closes = bars[i].close;
+                            closes = closes.add(1);
+                        }
+                    }
+                }
+                return count as u32;
+            }
+        }
+        0
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_series_get_line_data(
+        chart: *mut Chart,
+        series_id: u32,
+        times: *mut i64,
+        values: *mut f64,
+        max_count: u32,
+    ) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get(series_id) {
+            if let crate::series::SeriesData::Line(pts) = &series.data {
+                let count = (max_count as usize).min(pts.len());
+                unsafe {
+                    let mut times = times;
+                    let mut values = values;
+                    for i in 0..count {
+                        if !times.is_null() {
+                            *times = pts[i].time;
+                            times = times.add(1);
+                        }
+                        if !values.is_null() {
+                            *values = pts[i].value;
+                            values = values.add(1);
+                        }
+                    }
+                }
+                return count as u32;
+            }
+        }
+        0
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_series_get_histogram_data(
+        chart: *mut Chart,
+        series_id: u32,
+        times: *mut i64,
+        values: *mut f64,
+        max_count: u32,
+    ) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get(series_id) {
+            if let crate::series::SeriesData::Histogram(pts) = &series.data {
+                let count = (max_count as usize).min(pts.len());
+                unsafe {
+                    let mut times = times;
+                    let mut values = values;
+                    for i in 0..count {
+                        if !times.is_null() {
+                            *times = pts[i].time;
+                            times = times.add(1);
+                        }
+                        if !values.is_null() {
+                            *values = pts[i].value;
+                            values = values.add(1);
+                        }
+                    }
+                }
+                return count as u32;
+            }
+        }
+        0
+    }
+
+    #[no_mangle]
+    pub extern "C" fn chart_series_get_last_value_data(
+        chart: *mut Chart,
+        series_id: u32,
+        out_time: *mut i64,
+        out_value: *mut f64,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(series) = chart.state.series.get(series_id) {
+            match &series.data {
+                crate::series::SeriesData::Ohlc(bars) => {
+                    if let Some(b) = bars.last() {
+                        unsafe {
+                            if !out_time.is_null() {
+                                *out_time = b.time;
+                            }
+                            if !out_value.is_null() {
+                                *out_value = b.close;
+                            }
+                        }
+                        return true;
+                    }
+                }
+                crate::series::SeriesData::Line(pts) => {
+                    if let Some(p) = pts.last() {
+                        unsafe {
+                            if !out_time.is_null() {
+                                *out_time = p.time;
+                            }
+                            if !out_value.is_null() {
+                                *out_value = p.value;
+                            }
+                        }
+                        return true;
+                    }
+                }
+                crate::series::SeriesData::Histogram(pts) => {
+                    if let Some(p) = pts.last() {
+                        unsafe {
+                            if !out_time.is_null() {
+                                *out_time = p.time;
+                            }
+                            if !out_value.is_null() {
+                                *out_value = p.value;
+                            }
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Set OHLC data for a specific series.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_series_set_ohlc_data(
+        chart: *mut Chart,
+        series_id: u32,
+        times: *const i64,
+        opens: *const f64,
+        highs: *const f64,
+        lows: *const f64,
+        closes: *const f64,
+        count: u32,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let count = count as usize;
+        let times = unsafe { std::slice::from_raw_parts(times, count) };
+        let opens = unsafe { std::slice::from_raw_parts(opens, count) };
+        let highs = unsafe { std::slice::from_raw_parts(highs, count) };
+        let lows = unsafe { std::slice::from_raw_parts(lows, count) };
+        let closes = unsafe { std::slice::from_raw_parts(closes, count) };
+
+        let mut bars = Vec::with_capacity(count);
+        for i in 0..count {
+            bars.push(crate::chart_model::OhlcBar {
+                time: times[i],
+                open: opens[i],
+                high: highs[i],
+                low: lows[i],
+                close: closes[i],
+            });
+        }
+        if let Some(series) = chart.state.series.get_mut(series_id) {
+            series.data.set_ohlc(bars);
+            return true;
+        }
+        false
+    }
+
+    /// Set Line/Area/Baseline data for a specific series.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_series_set_line_data(
+        chart: *mut Chart,
+        series_id: u32,
+        times: *const i64,
+        values: *const f64,
+        count: u32,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let count = count as usize;
+        let times = unsafe { std::slice::from_raw_parts(times, count) };
+        let values = unsafe { std::slice::from_raw_parts(values, count) };
+
+        let mut pts = Vec::with_capacity(count);
+        for i in 0..count {
+            pts.push(crate::series::LineDataPoint {
+                time: times[i],
+                value: values[i],
+            });
+        }
+        if let Some(series) = chart.state.series.get_mut(series_id) {
+            series.data.set_line(pts);
+            return true;
+        }
+        false
+    }
+
+    /// Set Histogram data for a specific series.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_series_set_histogram_data(
+        chart: *mut Chart,
+        series_id: u32,
+        times: *const i64,
+        values: *const f64,
+        colors: *const u32,
+        count: u32,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let count = count as usize;
+        let times = unsafe { std::slice::from_raw_parts(times, count) };
+        let values = unsafe { std::slice::from_raw_parts(values, count) };
+        let colors = if colors.is_null() {
+            None
+        } else {
+            Some(unsafe { std::slice::from_raw_parts(colors, count) })
+        };
+
+        let mut pts = Vec::with_capacity(count);
+        for i in 0..count {
+            let color = if let Some(c) = colors {
+                let bytes = c[i].to_be_bytes();
+                Some([
+                    bytes[0] as f32 / 255.0,
+                    bytes[1] as f32 / 255.0,
+                    bytes[2] as f32 / 255.0,
+                    bytes[3] as f32 / 255.0,
+                ])
+            } else {
+                None
+            };
+            pts.push(crate::series::HistogramDataPoint {
+                time: times[i],
+                value: values[i],
+                color,
+            });
+        }
+        if let Some(series) = chart.state.series.get_mut(series_id) {
+            series.data.set_histogram(pts);
+            return true;
+        }
+        false
     }
 
     /// Add a new line series to the chart from an array of (time, value) pairs.
@@ -584,5 +1382,100 @@ mod native {
             &*chart
         };
         chart.state.series.len() as u32
+    }
+
+    // ----- Pane Management C-ABIs -----
+
+    /// Add a new pane to the chart. Returns the pane ID.
+    /// `height_stretch` controls relative height (1.0 = equal to other panes).
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_add_pane(chart: *mut Chart, height_stretch: f32) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.add_pane(height_stretch)
+    }
+
+    /// Remove a pane by ID. Returns true if removed.
+    /// Pane 0 (main) cannot be removed. Orphaned series move to pane 0.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_remove_pane(chart: *mut Chart, pane_id: u32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.remove_pane(pane_id)
+    }
+
+    /// Move a series to a specific pane (by pane ID).
+    /// Returns true if both the series and pane were found.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_series_move_to_pane(
+        chart: *mut Chart,
+        series_id: u32,
+        pane_id: u32,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.move_series_to_pane(series_id, pane_id)
+    }
+
+    /// Get the number of panes.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_pane_count(chart: *const Chart) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        chart.state.panes.len() as u32
+    }
+
+    /// Swap two panes by their IDs.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_swap_panes(chart: *mut Chart, pane_id_a: u32, pane_id_b: u32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.swap_panes(pane_id_a, pane_id_b)
+    }
+
+    /// Get the layout rect of a pane by ID.
+    /// Returns true if pane exists, writing x/y/width/height to the out pointers.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_pane_size(
+        chart: *const Chart,
+        pane_id: u32,
+        out_x: *mut f32,
+        out_y: *mut f32,
+        out_width: *mut f32,
+        out_height: *mut f32,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        if let Some((x, y, w, h)) = chart.state.pane_size(pane_id) {
+            unsafe {
+                if !out_x.is_null() {
+                    *out_x = x;
+                }
+                if !out_y.is_null() {
+                    *out_y = y;
+                }
+                if !out_width.is_null() {
+                    *out_width = w;
+                }
+                if !out_height.is_null() {
+                    *out_height = h;
+                }
+            }
+            true
+        } else {
+            false
+        }
     }
 }

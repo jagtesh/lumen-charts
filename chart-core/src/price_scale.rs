@@ -1,6 +1,7 @@
 use crate::chart_model::{OhlcBar, Rect};
 
 /// Maps price values to Y pixel coordinates (inverted: high price = low y)
+#[derive(Debug, Clone)]
 pub struct PriceScale {
     pub min_price: f64,
     pub max_price: f64,
