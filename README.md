@@ -15,11 +15,11 @@ possible, making migration straightforward:
 
 ### Swift Demo (macOS, Metal)
 
-![Swift Demo — Candlestick + Overlay + MACD](assets/swift-demo.png)
+![Swift Demo — Candlestick + Overlay + MACD](https://raw.githubusercontent.com/jagtesh/lumen-charts/main/assets/swift-demo.png)
 
 ### WASM Demo (Chrome, WebGPU)
 
-![WASM Web Demo — Candlestick + MACD](assets/web-demo.png)
+![WASM Web Demo — Candlestick + MACD](https://raw.githubusercontent.com/jagtesh/lumen-charts/main/assets/web-demo.png)
 
 ## Project Structure
 
