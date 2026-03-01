@@ -740,7 +740,7 @@ pub fn chart_time_scale_width() -> f32 {
 
 #[wasm_bindgen]
 pub fn chart_time_scale_height() -> f32 {
-    with_chart_ret(|chart| chart.state.layout.x_axis_height)
+    with_chart_ret(|chart| chart.state.layout.margins.bottom)
 }
 
 // --- IPriceScaleApi ---
