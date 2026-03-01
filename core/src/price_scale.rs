@@ -1,10 +1,18 @@
 use crate::chart_model::{OhlcBar, Rect};
 
+/// Price scale mode (linear vs logarithmic)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PriceScaleMode {
+    Normal,
+    Logarithmic,
+}
+
 /// Maps price values to Y pixel coordinates (inverted: high price = low y)
 #[derive(Debug, Clone)]
 pub struct PriceScale {
     pub min_price: f64,
     pub max_price: f64,
+    pub mode: PriceScaleMode,
 }
 
 impl PriceScale {
@@ -14,6 +22,7 @@ impl PriceScale {
             return PriceScale {
                 min_price: 0.0,
                 max_price: 100.0,
+                mode: PriceScaleMode::Normal,
             };
         }
         let min = bars.iter().map(|b| b.low).fold(f64::INFINITY, f64::min);
@@ -26,11 +35,28 @@ impl PriceScale {
         PriceScale {
             min_price: min - margin,
             max_price: max + margin,
+            mode: PriceScaleMode::Normal,
         }
     }
 
     /// Convert price value to y pixel coordinate
     pub fn price_to_y(&self, price: f64, plot_area: &Rect) -> f32 {
+        match self.mode {
+            PriceScaleMode::Normal => self.price_to_y_linear(price, plot_area),
+            PriceScaleMode::Logarithmic => self.price_to_y_log(price, plot_area),
+        }
+    }
+
+    /// Convert y pixel coordinate to price value (inverse of price_to_y)
+    pub fn y_to_price(&self, y: f32, plot_area: &Rect) -> f64 {
+        match self.mode {
+            PriceScaleMode::Normal => self.y_to_price_linear(y, plot_area),
+            PriceScaleMode::Logarithmic => self.y_to_price_log(y, plot_area),
+        }
+    }
+
+    /// Linear price → y
+    fn price_to_y_linear(&self, price: f64, plot_area: &Rect) -> f32 {
         let range = self.max_price - self.min_price;
         if range == 0.0 {
             return plot_area.y + plot_area.height * 0.5;
@@ -39,14 +65,38 @@ impl PriceScale {
         plot_area.y + plot_area.height * (1.0 - normalized as f32)
     }
 
-    /// Convert y pixel coordinate to price value (inverse of price_to_y)
-    pub fn y_to_price(&self, y: f32, plot_area: &Rect) -> f64 {
+    /// Linear y → price
+    fn y_to_price_linear(&self, y: f32, plot_area: &Rect) -> f64 {
         let range = self.max_price - self.min_price;
         if range == 0.0 {
             return self.min_price;
         }
         let normalized = 1.0 - ((y - plot_area.y) / plot_area.height) as f64;
         self.min_price + normalized * range
+    }
+
+    /// Logarithmic price → y (uses ln for log scaling)
+    fn price_to_y_log(&self, price: f64, plot_area: &Rect) -> f32 {
+        let min_log = self.min_price.max(1e-10).ln();
+        let max_log = self.max_price.max(1e-10).ln();
+        let range = max_log - min_log;
+        if range == 0.0 {
+            return plot_area.y + plot_area.height * 0.5;
+        }
+        let normalized = (price.max(1e-10).ln() - min_log) / range;
+        plot_area.y + plot_area.height * (1.0 - normalized as f32)
+    }
+
+    /// Logarithmic y → price
+    fn y_to_price_log(&self, y: f32, plot_area: &Rect) -> f64 {
+        let min_log = self.min_price.max(1e-10).ln();
+        let max_log = self.max_price.max(1e-10).ln();
+        let range = max_log - min_log;
+        if range == 0.0 {
+            return self.min_price;
+        }
+        let normalized = 1.0 - ((y - plot_area.y) / plot_area.height) as f64;
+        (min_log + normalized * range).exp()
     }
 }
 

@@ -1,7 +1,8 @@
 /// Parity tests from LWC: tests/unittests/formatters.spec.ts
 ///
 /// Price, percentage, volume formatters pass now.
-/// Date/datetime/time formatters are #[ignore] until implemented.
+/// Date/datetime/time formatters now use lumen_charts::formatters.
+use lumen_charts::formatters;
 
 /// LWC: price-formatter default — PriceFormatter().format(1.5) === '1.50'
 /// File: formatters.spec.ts, line 38
@@ -69,35 +70,39 @@ fn lwc_volume_formatter() {
 /// LWC: date-formatter — 1516147200 → '2018-01-17'
 /// File: formatters.spec.ts, line 13
 #[test]
-#[ignore] // Requires date formatting from unix timestamp
 fn lwc_date_formatter_default() {
-    todo!("unix_ts_to_date_string(1516147200) == '2018-01-17'");
+    assert_eq!(formatters::format_date(1516147200), "2018-01-17");
 }
 
 /// LWC: date-formatter — custom 'dd-MM-yyyy' → '17-01-2018'
 #[test]
-#[ignore]
 fn lwc_date_formatter_custom() {
-    todo!("custom format: '17-01-2018'");
+    assert_eq!(
+        formatters::format_date_custom(1516147200, "%d-%m-%Y"),
+        "17-01-2018"
+    );
 }
 
 /// LWC: date-time-formatter — 1538381512 → '2018-10-01 08:11:52'
 #[test]
-#[ignore]
 fn lwc_datetime_formatter() {
-    todo!("datetime format");
+    assert_eq!(
+        formatters::format_datetime(1538381512),
+        "2018-10-01 08:11:52"
+    );
 }
 
 /// LWC: time-formatter default — 1538381512 → '08:11:52'
 #[test]
-#[ignore]
 fn lwc_time_formatter_default() {
-    todo!("time format");
+    assert_eq!(formatters::format_time(1538381512), "08:11:52");
 }
 
 /// LWC: time-formatter custom '%h-%m-%s' → '08-11-52'
 #[test]
-#[ignore]
 fn lwc_time_formatter_custom() {
-    todo!("custom time format");
+    assert_eq!(
+        formatters::format_time_custom(1538381512, "%H-%M-%S"),
+        "08-11-52"
+    );
 }
