@@ -6,6 +6,7 @@ pub mod data_layer;
 pub mod overlays;
 pub mod price_scale;
 pub mod sample_data;
+pub mod series;
 pub mod text_render;
 pub mod tick_marks;
 pub mod time_scale;
@@ -354,5 +355,21 @@ mod native {
             &*chart
         };
         chart.state.bar_count() as u32
+    }
+
+    /// Set the active series type. 0=OHLC, 1=Candlestick, 2=Line.
+    #[no_mangle]
+    pub extern "C" fn chart_set_series_type(chart: *mut Chart, series_type: u32) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.active_series_type = match series_type {
+            0 => crate::series::SeriesType::Ohlc,
+            1 => crate::series::SeriesType::Candlestick,
+            2 => crate::series::SeriesType::Line,
+            _ => return false,
+        };
+        true
     }
 }

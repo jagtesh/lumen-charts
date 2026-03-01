@@ -2,6 +2,7 @@ use crate::chart_model::{ChartData, ChartLayout, OhlcBar};
 use crate::chart_options::ChartOptions;
 use crate::overlays::Overlays;
 use crate::price_scale::PriceScale;
+use crate::series::{SeriesCollection, SeriesType};
 use crate::time_scale::TimeScale;
 
 /// Crosshair position state
@@ -120,6 +121,8 @@ pub struct ChartState {
     pub drag: DragState,
     pub options: ChartOptions,
     pub overlays: Overlays,
+    pub active_series_type: SeriesType,
+    pub series: SeriesCollection,
 
     // Click/dbl-click detection
     last_click_x: f32,
@@ -159,6 +162,8 @@ impl ChartState {
             drag: DragState::default(),
             options,
             overlays: Overlays::new(),
+            active_series_type: SeriesType::default(),
+            series: SeriesCollection::new(),
             last_click_x: 0.0,
             last_click_y: 0.0,
             frames_since_last_click: DBL_CLICK_MAX_FRAMES + 1,

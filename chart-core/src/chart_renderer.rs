@@ -5,6 +5,7 @@ use vello::Scene;
 use crate::chart_model::Rect;
 use crate::chart_state::ChartState;
 use crate::overlays::{LineStyle, MarkerPosition, MarkerShape};
+use crate::series::{SeriesData, SeriesType};
 use crate::text_render::{chart_font, draw_text, measure_text};
 use crate::tick_marks::{generate_price_ticks, generate_time_ticks, TickMark};
 
@@ -39,7 +40,28 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
         draw_watermark(scene, state, &font, t);
     }
 
-    draw_ohlc_bars(scene, state, t);
+    // Draw primary series (from state.data, using active_series_type)
+    match state.active_series_type {
+        SeriesType::Ohlc => draw_ohlc_bars(scene, state, t),
+        SeriesType::Candlestick => draw_candlestick_bars(scene, state, t),
+        SeriesType::Line => draw_line_series_from_ohlc(scene, state, t),
+    }
+
+    // Draw additional series from the collection
+    for series in &state.series.series {
+        if !series.visible {
+            continue;
+        }
+        match (&series.series_type, &series.data) {
+            (SeriesType::Line, SeriesData::Line(pts)) => {
+                draw_line_series(scene, state, pts, &series.line_options, t);
+            }
+            (SeriesType::Candlestick, SeriesData::Ohlc(bars)) => {
+                draw_candlestick_bars_data(scene, state, bars, &series.candlestick_options, t);
+            }
+            _ => {} // Other combos use default OHLC
+        }
+    }
 
     // Overlays on top of bars
     draw_price_lines(scene, state, &font, t);
@@ -572,5 +594,207 @@ fn draw_last_value_marker(scene: &mut Scene, state: &ChartState, font: &Font, t:
             &Line::new((x as f64, y as f64), (end as f64, y as f64)),
         );
         x += dash_len + gap_len;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Candlestick renderer
+// ---------------------------------------------------------------------------
+
+fn draw_candlestick_bars(scene: &mut Scene, state: &ChartState, t: Affine) {
+    let plot_area = &state.layout.plot_area;
+    let (first, last) = state.time_scale.visible_range(plot_area.width);
+    let first = first.saturating_sub(1);
+    let last = (last + 1).min(state.data.bars.len());
+    let body_width = (state.time_scale.bar_spacing * 0.6).max(1.0);
+
+    for i in first..last {
+        let bar = &state.data.bars[i];
+        let x = state.time_scale.index_to_x(i, plot_area);
+        if x < plot_area.x - body_width || x > plot_area.x + plot_area.width + body_width {
+            continue;
+        }
+
+        let high_y = state.price_scale.price_to_y(bar.high, plot_area);
+        let low_y = state.price_scale.price_to_y(bar.low, plot_area);
+        let open_y = state.price_scale.price_to_y(bar.open, plot_area);
+        let close_y = state.price_scale.price_to_y(bar.close, plot_area);
+        let bullish = bar.close >= bar.open;
+
+        let fill_color = if bullish { BULL_COLOR } else { BEAR_COLOR };
+        let wick_color = fill_color;
+
+        // Wick (high-low line)
+        let wick_stroke = Stroke::new(1.0);
+        scene.stroke(
+            &wick_stroke,
+            t,
+            wick_color,
+            None,
+            &Line::new((x as f64, high_y as f64), (x as f64, low_y as f64)),
+        );
+
+        // Body (filled rectangle)
+        let top_y = open_y.min(close_y);
+        let bot_y = open_y.max(close_y);
+        let body_h = (bot_y - top_y).max(1.0); // minimum 1px body
+        let body_rect = KurboRect::new(
+            (x - body_width / 2.0) as f64,
+            top_y as f64,
+            (x + body_width / 2.0) as f64,
+            (top_y + body_h) as f64,
+        );
+
+        scene.fill(
+            vello::peniko::Fill::NonZero,
+            t,
+            fill_color,
+            None,
+            &body_rect,
+        );
+    }
+}
+
+/// Draw candlestick bars from arbitrary bar data (for multi-series support)
+fn draw_candlestick_bars_data(
+    scene: &mut Scene,
+    state: &ChartState,
+    bars: &[crate::chart_model::OhlcBar],
+    opts: &crate::series::CandlestickOptions,
+    t: Affine,
+) {
+    let plot_area = &state.layout.plot_area;
+    let body_width = (state.time_scale.bar_spacing * 0.6).max(1.0);
+
+    for (i, bar) in bars.iter().enumerate() {
+        let x = state.time_scale.index_to_x(i, plot_area);
+        if x < plot_area.x - body_width || x > plot_area.x + plot_area.width + body_width {
+            continue;
+        }
+
+        let high_y = state.price_scale.price_to_y(bar.high, plot_area);
+        let low_y = state.price_scale.price_to_y(bar.low, plot_area);
+        let open_y = state.price_scale.price_to_y(bar.open, plot_area);
+        let close_y = state.price_scale.price_to_y(bar.close, plot_area);
+        let bullish = bar.close >= bar.open;
+
+        let fill_color = Color::new(if bullish {
+            opts.up_color
+        } else {
+            opts.down_color
+        });
+        let wick_color = Color::new(if bullish {
+            opts.wick_up_color
+        } else {
+            opts.wick_down_color
+        });
+
+        let wick_stroke = Stroke::new(1.0);
+        scene.stroke(
+            &wick_stroke,
+            t,
+            wick_color,
+            None,
+            &Line::new((x as f64, high_y as f64), (x as f64, low_y as f64)),
+        );
+
+        let top_y = open_y.min(close_y);
+        let bot_y = open_y.max(close_y);
+        let body_h = (bot_y - top_y).max(1.0);
+        let body_rect = KurboRect::new(
+            (x - body_width / 2.0) as f64,
+            top_y as f64,
+            (x + body_width / 2.0) as f64,
+            (top_y + body_h) as f64,
+        );
+
+        scene.fill(
+            vello::peniko::Fill::NonZero,
+            t,
+            fill_color,
+            None,
+            &body_rect,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Line series renderers
+// ---------------------------------------------------------------------------
+
+/// Draw a line series from OHLC close prices (for primary series)
+fn draw_line_series_from_ohlc(scene: &mut Scene, state: &ChartState, t: Affine) {
+    let plot_area = &state.layout.plot_area;
+    let (first, last) = state.time_scale.visible_range(plot_area.width);
+    let first = first.saturating_sub(1);
+    let last = (last + 1).min(state.data.bars.len());
+
+    if last <= first + 1 {
+        return;
+    }
+
+    let color = Color::new([0.26, 0.52, 0.96, 1.0]); // Blue line
+    let stroke = Stroke::new(2.0);
+
+    for i in first..last.saturating_sub(1) {
+        let x1 = state.time_scale.index_to_x(i, plot_area);
+        let x2 = state.time_scale.index_to_x(i + 1, plot_area);
+        let y1 = state
+            .price_scale
+            .price_to_y(state.data.bars[i].close, plot_area);
+        let y2 = state
+            .price_scale
+            .price_to_y(state.data.bars[i + 1].close, plot_area);
+
+        scene.stroke(
+            &stroke,
+            t,
+            color,
+            None,
+            &Line::new((x1 as f64, y1 as f64), (x2 as f64, y2 as f64)),
+        );
+    }
+}
+
+/// Draw a line series from LineDataPoint data
+fn draw_line_series(
+    scene: &mut Scene,
+    state: &ChartState,
+    points: &[crate::series::LineDataPoint],
+    opts: &crate::series::LineSeriesOptions,
+    t: Affine,
+) {
+    if points.len() < 2 {
+        return;
+    }
+
+    let plot_area = &state.layout.plot_area;
+    let color = Color::new(opts.color);
+    let stroke = Stroke::new(opts.line_width as f64);
+
+    for i in 0..points.len() - 1 {
+        let x1 = state.time_scale.index_to_x(i, plot_area);
+        let x2 = state.time_scale.index_to_x(i + 1, plot_area);
+        let y1 = state.price_scale.price_to_y(points[i].value, plot_area);
+        let y2 = state.price_scale.price_to_y(points[i + 1].value, plot_area);
+
+        scene.stroke(
+            &stroke,
+            t,
+            color,
+            None,
+            &Line::new((x1 as f64, y1 as f64), (x2 as f64, y2 as f64)),
+        );
+    }
+
+    // Optional point markers
+    if opts.point_markers_visible {
+        for (i, pt) in points.iter().enumerate() {
+            let x = state.time_scale.index_to_x(i, plot_area);
+            let y = state.price_scale.price_to_y(pt.value, plot_area);
+            let circle =
+                vello::kurbo::Circle::new((x as f64, y as f64), opts.point_markers_radius as f64);
+            scene.fill(vello::peniko::Fill::NonZero, t, color, None, &circle);
+        }
     }
 }

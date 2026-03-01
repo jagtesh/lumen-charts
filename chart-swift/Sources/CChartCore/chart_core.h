@@ -30,4 +30,7 @@ void chart_set_data(Chart* chart, const double* data, uint32_t count);
 bool chart_update_bar(Chart* chart, int64_t time, double open, double high, double low, double close);
 uint32_t chart_bar_count(Chart* chart);
 
+// Series type (0=OHLC, 1=Candlestick, 2=Line)
+bool chart_set_series_type(Chart* chart, uint32_t series_type);
+
 #endif // CHART_CORE_H
