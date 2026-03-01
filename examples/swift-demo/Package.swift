@@ -4,23 +4,19 @@ import PackageDescription
 let package = Package(
     name: "ChartDemo",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(path: "../../sdks/swift"),
+    ],
     targets: [
-        .systemLibrary(
-            name: "CChartCore",
-            path: "Sources/CChartCore"
-        ),
-        .target(
-            name: "LightweightCharts",
-            dependencies: ["CChartCore"],
-            path: "Sources/LightweightCharts"
-        ),
         .executableTarget(
             name: "ChartDemo",
-            dependencies: ["CChartCore", "LightweightCharts"],
+            dependencies: [
+                .product(name: "LightweightCharts", package: "swift"),
+            ],
             path: "Sources/ChartDemo",
             linkerSettings: [
                 .unsafeFlags([
-                    "-L", "../chart-core/target/release",
+                    "-L", "../../core/target/release",
                     "-lchart_core",
                 ]),
                 .linkedFramework("QuartzCore"),
