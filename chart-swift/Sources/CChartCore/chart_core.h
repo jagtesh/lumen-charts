@@ -25,4 +25,9 @@ bool chart_fit_content(Chart* chart);
 bool chart_key_down(Chart* chart, uint32_t key_code);
 void chart_tick(Chart* chart);
 
+// Data management
+void chart_set_data(Chart* chart, const double* data, uint32_t count);
+bool chart_update_bar(Chart* chart, int64_t time, double open, double high, double low, double close);
+uint32_t chart_bar_count(Chart* chart);
+
 #endif // CHART_CORE_H

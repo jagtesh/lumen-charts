@@ -1,4 +1,5 @@
-use crate::chart_model::{ChartData, ChartLayout};
+use crate::chart_model::{ChartData, ChartLayout, OhlcBar};
+use crate::chart_options::ChartOptions;
 use crate::price_scale::PriceScale;
 use crate::time_scale::TimeScale;
 
@@ -116,6 +117,7 @@ pub struct ChartState {
     pub layout: ChartLayout,
     pub crosshair: Crosshair,
     pub drag: DragState,
+    pub options: ChartOptions,
 
     // Click/dbl-click detection
     last_click_x: f32,
@@ -124,7 +126,7 @@ pub struct ChartState {
     click_pending: bool,
 
     // Y-axis drag state (for price scale zoom)
-    y_axis_drag_start_range: Option<(f64, f64)>, // (min_price, max_price) at drag start
+    y_axis_drag_start_range: Option<(f64, f64)>,
 
     /// Pending events from the last interaction call
     pub pending_events: InteractionEvents,
@@ -132,6 +134,16 @@ pub struct ChartState {
 
 impl ChartState {
     pub fn new(data: ChartData, width: f32, height: f32, scale_factor: f64) -> Self {
+        Self::with_options(data, width, height, scale_factor, ChartOptions::default())
+    }
+
+    pub fn with_options(
+        data: ChartData,
+        width: f32,
+        height: f32,
+        scale_factor: f64,
+        options: ChartOptions,
+    ) -> Self {
         let layout = ChartLayout::new(width, height, scale_factor);
         let time_scale = TimeScale::new(data.bars.len(), layout.plot_area.width);
         let price_scale = PriceScale::from_data(&data.bars);
@@ -143,6 +155,7 @@ impl ChartState {
             layout,
             crosshair: Crosshair::default(),
             drag: DragState::default(),
+            options,
             last_click_x: 0.0,
             last_click_y: 0.0,
             frames_since_last_click: DBL_CLICK_MAX_FRAMES + 1,
@@ -463,6 +476,65 @@ impl ChartState {
             self.price_scale.min_price = mid - new_half;
             self.price_scale.max_price = mid + new_half;
         }
+    }
+
+    // --- Data management ---
+
+    /// Replace all bar data. Resets time scale to fit new data.
+    pub fn set_data(&mut self, bars: Vec<OhlcBar>) {
+        self.data.bars = bars;
+        self.data.bars.sort_by_key(|b| b.time);
+        self.time_scale = TimeScale::new(self.data.bars.len(), self.layout.plot_area.width);
+        self.update_price_scale();
+    }
+
+    /// Update or append a single bar (by timestamp).
+    /// If a bar with the same timestamp exists, it is replaced.
+    /// Otherwise inserted in sorted position.
+    pub fn update_bar(&mut self, bar: OhlcBar) {
+        match self.data.bars.binary_search_by_key(&bar.time, |b| b.time) {
+            Ok(idx) => {
+                self.data.bars[idx] = bar;
+            }
+            Err(idx) => {
+                self.data.bars.insert(idx, bar);
+                self.time_scale = TimeScale::new(self.data.bars.len(), self.layout.plot_area.width);
+            }
+        }
+        self.update_price_scale();
+    }
+
+    /// Remove and return the last (most recent) bar.
+    pub fn pop_bar(&mut self) -> Option<OhlcBar> {
+        let bar = self.data.bars.pop();
+        if bar.is_some() {
+            self.time_scale = TimeScale::new(self.data.bars.len(), self.layout.plot_area.width);
+            self.update_price_scale();
+        }
+        bar
+    }
+
+    /// Get the number of bars.
+    pub fn bar_count(&self) -> usize {
+        self.data.bars.len()
+    }
+
+    // --- Options ---
+
+    /// Apply new chart options. Returns true (always needs redraw).
+    pub fn apply_options(&mut self, options: ChartOptions) -> bool {
+        self.options = options;
+        true
+    }
+
+    /// Get a reference to current options.
+    pub fn options(&self) -> &ChartOptions {
+        &self.options
+    }
+
+    /// Format a price value using the configured price format.
+    pub fn format_price(&self, price: f64) -> String {
+        self.options.price_scale.format.format(price)
     }
 }
 
@@ -819,5 +891,93 @@ mod tests {
 
         // Outside
         assert_eq!(state.hit_zone(-10.0, -10.0), HitZone::None);
+    }
+
+    // --- Slice 3: Data management + Options tests ---
+
+    fn make_bar(time: i64, close: f64) -> OhlcBar {
+        OhlcBar {
+            time,
+            open: close - 1.0,
+            high: close + 0.5,
+            low: close - 1.5,
+            close,
+        }
+    }
+
+    #[test]
+    fn test_set_data_replaces_bars() {
+        let mut state = make_state();
+        let original_count = state.bar_count();
+
+        let new_bars = vec![make_bar(100, 50.0), make_bar(200, 60.0)];
+        state.set_data(new_bars);
+
+        assert_eq!(state.bar_count(), 2);
+        assert_ne!(state.bar_count(), original_count);
+        assert_eq!(state.data.bars[0].time, 100);
+        assert_eq!(state.data.bars[1].time, 200);
+    }
+
+    #[test]
+    fn test_set_data_sorts() {
+        let mut state = make_state();
+        let new_bars = vec![
+            make_bar(300, 30.0),
+            make_bar(100, 10.0),
+            make_bar(200, 20.0),
+        ];
+        state.set_data(new_bars);
+        assert_eq!(state.data.bars[0].time, 100);
+        assert_eq!(state.data.bars[2].time, 300);
+    }
+
+    #[test]
+    fn test_update_bar_append() {
+        let mut state = make_state();
+        let count_before = state.bar_count();
+        let new_time = i64::MAX; // Way in the future
+        state.update_bar(make_bar(new_time, 999.0));
+        assert_eq!(state.bar_count(), count_before + 1);
+    }
+
+    #[test]
+    fn test_update_bar_replace() {
+        let mut state = make_state();
+        let first_time = state.data.bars[0].time;
+        let count_before = state.bar_count();
+
+        state.update_bar(make_bar(first_time, 999.0));
+        assert_eq!(state.bar_count(), count_before); // Same count
+        assert!((state.data.bars[0].close - 999.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_pop_bar() {
+        let mut state = make_state();
+        let count_before = state.bar_count();
+
+        let popped = state.pop_bar();
+        assert!(popped.is_some());
+        assert_eq!(state.bar_count(), count_before - 1);
+    }
+
+    #[test]
+    fn test_format_price_default() {
+        let state = make_state();
+        let formatted = state.format_price(123.456);
+        assert_eq!(formatted, "123.46"); // Default precision=2
+    }
+
+    #[test]
+    fn test_apply_options() {
+        let mut state = make_state();
+        let mut new_opts = ChartOptions::default();
+        new_opts.price_scale.format.precision = 4;
+        new_opts.price_scale.format.prefix = "$".to_string();
+
+        let needs_redraw = state.apply_options(new_opts);
+        assert!(needs_redraw);
+        assert_eq!(state.format_price(123.4), "$123.4000");
     }
 }

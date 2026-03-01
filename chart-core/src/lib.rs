@@ -1,6 +1,8 @@
 pub mod chart_model;
+pub mod chart_options;
 pub mod chart_renderer;
 pub mod chart_state;
+pub mod data_layer;
 pub mod price_scale;
 pub mod sample_data;
 pub mod text_render;
@@ -290,5 +292,66 @@ mod native {
             &mut *chart
         };
         chart.state.tick();
+    }
+
+    // ----- Data management C-ABI -----
+
+    /// Set all bar data from a flat array of (time, open, high, low, close).
+    /// `count` is the number of bars. `data` points to `count * 5` doubles.
+    #[no_mangle]
+    pub extern "C" fn chart_set_data(chart: *mut Chart, data: *const f64, count: u32) {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let count = count as usize;
+        let slice = unsafe { std::slice::from_raw_parts(data, count * 5) };
+        let bars: Vec<crate::chart_model::OhlcBar> = (0..count)
+            .map(|i| {
+                let base = i * 5;
+                crate::chart_model::OhlcBar {
+                    time: slice[base] as i64,
+                    open: slice[base + 1],
+                    high: slice[base + 2],
+                    low: slice[base + 3],
+                    close: slice[base + 4],
+                }
+            })
+            .collect();
+        chart.state.set_data(bars);
+    }
+
+    /// Update or insert a single bar.
+    #[no_mangle]
+    pub extern "C" fn chart_update_bar(
+        chart: *mut Chart,
+        time: i64,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.update_bar(crate::chart_model::OhlcBar {
+            time,
+            open,
+            high,
+            low,
+            close,
+        });
+        true
+    }
+
+    /// Get the number of bars.
+    #[no_mangle]
+    pub extern "C" fn chart_bar_count(chart: *mut Chart) -> u32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        chart.state.bar_count() as u32
     }
 }
