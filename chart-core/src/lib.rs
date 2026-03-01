@@ -3,6 +3,7 @@ pub mod chart_options;
 pub mod chart_renderer;
 pub mod chart_state;
 pub mod data_layer;
+pub mod overlays;
 pub mod price_scale;
 pub mod sample_data;
 pub mod text_render;

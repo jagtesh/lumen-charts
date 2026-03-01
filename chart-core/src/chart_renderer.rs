@@ -4,6 +4,7 @@ use vello::Scene;
 
 use crate::chart_model::Rect;
 use crate::chart_state::ChartState;
+use crate::overlays::{LineStyle, MarkerPosition, MarkerShape};
 use crate::text_render::{chart_font, draw_text, measure_text};
 use crate::tick_marks::{generate_price_ticks, generate_time_ticks, TickMark};
 
@@ -32,7 +33,19 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
 
     draw_background(scene, layout, t);
     draw_grid(scene, &price_ticks, &time_ticks, &layout.plot_area, t);
+
+    // Watermark behind bars
+    if state.overlays.watermark.visible {
+        draw_watermark(scene, state, &font, t);
+    }
+
     draw_ohlc_bars(scene, state, t);
+
+    // Overlays on top of bars
+    draw_price_lines(scene, state, &font, t);
+    draw_series_markers(scene, state, t);
+    draw_last_value_marker(scene, state, &font, t);
+
     draw_y_axis(scene, &price_ticks, layout, &font, t);
     draw_x_axis(scene, &time_ticks, layout, &font, t);
 
@@ -323,5 +336,241 @@ fn draw_x_axis(
             TEXT_COLOR,
             t,
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Overlay rendering
+// ---------------------------------------------------------------------------
+
+fn draw_price_lines(scene: &mut Scene, state: &ChartState, font: &Font, t: Affine) {
+    let plot = &state.layout.plot_area;
+    let stroke = Stroke::new(1.0);
+
+    for line in &state.overlays.price_lines {
+        let y = state.price_scale.price_to_y(line.price, plot);
+        if y < plot.y || y > plot.y + plot.height {
+            continue; // Off-screen
+        }
+
+        let color = Color::new(line.color);
+
+        // Draw the line
+        match line.line_style {
+            LineStyle::Dashed => {
+                // Draw dashed line as segments
+                let dash_len = 6.0;
+                let gap_len = 4.0;
+                let mut x = plot.x;
+                while x < plot.x + plot.width {
+                    let end = (x + dash_len).min(plot.x + plot.width);
+                    scene.stroke(
+                        &stroke,
+                        t,
+                        color,
+                        None,
+                        &Line::new((x as f64, y as f64), (end as f64, y as f64)),
+                    );
+                    x += dash_len + gap_len;
+                }
+            }
+            LineStyle::Dotted => {
+                let dot_spacing = 4.0;
+                let mut x = plot.x;
+                while x < plot.x + plot.width {
+                    scene.stroke(
+                        &stroke,
+                        t,
+                        color,
+                        None,
+                        &Line::new((x as f64, y as f64), ((x + 1.0) as f64, y as f64)),
+                    );
+                    x += dot_spacing;
+                }
+            }
+            LineStyle::Solid => {
+                scene.stroke(
+                    &stroke,
+                    t,
+                    color,
+                    None,
+                    &Line::new(
+                        (plot.x as f64, y as f64),
+                        ((plot.x + plot.width) as f64, y as f64),
+                    ),
+                );
+            }
+        }
+
+        // Label on Y-axis
+        if line.label_visible {
+            let label_x = plot.x + plot.width + 4.0;
+            draw_text(
+                scene,
+                font,
+                &line.label,
+                label_x as f64,
+                (y + 3.0) as f64,
+                LABEL_FONT_SIZE,
+                color,
+                t,
+            );
+        }
+    }
+}
+
+fn draw_series_markers(scene: &mut Scene, state: &ChartState, t: Affine) {
+    let plot = &state.layout.plot_area;
+
+    for marker in &state.overlays.markers {
+        // Find the bar index for this marker's time
+        let idx = match state
+            .data
+            .bars
+            .binary_search_by_key(&marker.time, |b| b.time)
+        {
+            Ok(i) => i,
+            Err(_) => continue, // No matching bar
+        };
+
+        let bar = &state.data.bars[idx];
+        let x = state.time_scale.index_to_x(idx, plot);
+        if x < plot.x || x > plot.x + plot.width {
+            continue; // Off-screen
+        }
+
+        let price = marker.y_price(bar);
+        let y = state.price_scale.price_to_y(price, plot);
+        let offset = match marker.position {
+            MarkerPosition::AboveBar => -(marker.size + 4.0),
+            MarkerPosition::BelowBar => marker.size + 4.0,
+            MarkerPosition::AtPrice => 0.0,
+        };
+        let y = y + offset;
+        let color = Color::new(marker.color);
+        let half = marker.size / 2.0;
+
+        match marker.shape {
+            MarkerShape::ArrowUp => {
+                // Triangle pointing up
+                let path = vello::kurbo::BezPath::from_vec(vec![
+                    vello::kurbo::PathEl::MoveTo((x as f64, (y - half) as f64).into()),
+                    vello::kurbo::PathEl::LineTo(((x - half) as f64, (y + half) as f64).into()),
+                    vello::kurbo::PathEl::LineTo(((x + half) as f64, (y + half) as f64).into()),
+                    vello::kurbo::PathEl::ClosePath,
+                ]);
+                scene.fill(vello::peniko::Fill::NonZero, t, color, None, &path);
+            }
+            MarkerShape::ArrowDown => {
+                let path = vello::kurbo::BezPath::from_vec(vec![
+                    vello::kurbo::PathEl::MoveTo((x as f64, (y + half) as f64).into()),
+                    vello::kurbo::PathEl::LineTo(((x - half) as f64, (y - half) as f64).into()),
+                    vello::kurbo::PathEl::LineTo(((x + half) as f64, (y - half) as f64).into()),
+                    vello::kurbo::PathEl::ClosePath,
+                ]);
+                scene.fill(vello::peniko::Fill::NonZero, t, color, None, &path);
+            }
+            MarkerShape::Circle => {
+                let circle = vello::kurbo::Circle::new((x as f64, y as f64), half as f64);
+                scene.fill(vello::peniko::Fill::NonZero, t, color, None, &circle);
+            }
+            MarkerShape::Square => {
+                let rect = KurboRect::new(
+                    (x - half) as f64,
+                    (y - half) as f64,
+                    (x + half) as f64,
+                    (y + half) as f64,
+                );
+                scene.fill(vello::peniko::Fill::NonZero, t, color, None, &rect);
+            }
+        }
+    }
+}
+
+fn draw_watermark(scene: &mut Scene, state: &ChartState, font: &Font, t: Affine) {
+    let wm = &state.overlays.watermark;
+    let plot = &state.layout.plot_area;
+    let color = Color::new(wm.color);
+
+    let text_w = measure_text(font, &wm.text, wm.font_size);
+    let x = match wm.h_align {
+        crate::overlays::HAlign::Left => plot.x + 10.0,
+        crate::overlays::HAlign::Center => plot.x + (plot.width - text_w) / 2.0,
+        crate::overlays::HAlign::Right => plot.x + plot.width - text_w - 10.0,
+    };
+    let y = match wm.v_align {
+        crate::overlays::VAlign::Top => plot.y + wm.font_size + 10.0,
+        crate::overlays::VAlign::Center => plot.y + plot.height / 2.0,
+        crate::overlays::VAlign::Bottom => plot.y + plot.height - 10.0,
+    };
+
+    draw_text(
+        scene,
+        font,
+        &wm.text,
+        x as f64,
+        y as f64,
+        wm.font_size,
+        color,
+        t,
+    );
+}
+
+fn draw_last_value_marker(scene: &mut Scene, state: &ChartState, font: &Font, t: Affine) {
+    let lv = &state.overlays.last_value;
+    if !lv.visible || state.data.bars.is_empty() {
+        return;
+    }
+
+    let last_bar = state.data.bars.last().unwrap();
+    let plot = &state.layout.plot_area;
+    let y = state.price_scale.price_to_y(last_bar.close, plot);
+
+    if y < plot.y || y > plot.y + plot.height {
+        return;
+    }
+
+    let color = Color::new(lv.color);
+    let label = state.format_price(last_bar.close);
+    let label_w = measure_text(font, &label, LABEL_FONT_SIZE);
+
+    // Background rectangle on Y-axis
+    let label_x = plot.x + plot.width + 2.0;
+    let bg_rect = KurboRect::new(
+        label_x as f64,
+        (y - 8.0) as f64,
+        (label_x + label_w + 8.0) as f64,
+        (y + 8.0) as f64,
+    );
+    scene.fill(vello::peniko::Fill::NonZero, t, color, None, &bg_rect);
+
+    // White text on colored background
+    let text_color = Color::new([1.0, 1.0, 1.0, 1.0]);
+    draw_text(
+        scene,
+        font,
+        &label,
+        (label_x + 4.0) as f64,
+        (y + 3.0) as f64,
+        LABEL_FONT_SIZE,
+        text_color,
+        t,
+    );
+
+    // Dashed line from plot area to Y-axis
+    let stroke = Stroke::new(1.0);
+    let dash_len = 4.0;
+    let gap_len = 3.0;
+    let mut x = plot.x;
+    while x < plot.x + plot.width {
+        let end = (x + dash_len).min(plot.x + plot.width);
+        scene.stroke(
+            &stroke,
+            t,
+            color,
+            None,
+            &Line::new((x as f64, y as f64), (end as f64, y as f64)),
+        );
+        x += dash_len + gap_len;
     }
 }
