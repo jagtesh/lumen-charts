@@ -1,0 +1,17 @@
+Lumen Charts
+Copyright 2026 Jagtesh Chadha
+
+This product is inspired by Lightweight Charts™, an open-source library
+by TradingView, Inc., licensed under the Apache License, Version 2.0.
+
+The original Lightweight Charts library is available at:
+  https://github.com/nicjbrow/lightweight-charts
+
+Lightweight Charts™ is a trademark of TradingView, Inc.
+
+Original copyright notice:
+  Copyright (c) 2019 nicjbrow/lightweight-charts Authors.
+  Licensed under the Apache License, Version 2.0.
+
+Lumen Charts is an independent, clean-room implementation written in Rust.
+It is not affiliated with or endorsed by TradingView, Inc.

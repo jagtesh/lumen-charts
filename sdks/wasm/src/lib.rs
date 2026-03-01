@@ -3,9 +3,9 @@ use vello::wgpu;
 use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
 use std::cell::RefCell;
 
-use chart_core::chart_model::ChartData;
-use chart_core::chart_renderer::render_chart;
-use chart_core::chart_state::ChartState;
+use lumen_charts::chart_model::ChartData;
+use lumen_charts::chart_renderer::render_chart;
+use lumen_charts::chart_state::ChartState;
 
 /// Persistent chart context for the WASM module
 struct WasmChart {
@@ -216,7 +216,7 @@ pub fn chart_fit_content() {
 #[wasm_bindgen]
 pub fn chart_key_down(key_code: u32) {
     with_chart(|chart| {
-        let key = chart_core::chart_state::ChartKey::from_code(key_code);
+        let key = lumen_charts::chart_state::ChartKey::from_code(key_code);
         chart.state.key_down(key)
     });
 }
@@ -234,10 +234,10 @@ pub fn chart_tick() {
 #[wasm_bindgen]
 pub fn chart_set_data(data: &[f64]) {
     let count = data.len() / 5;
-    let bars: Vec<chart_core::chart_model::OhlcBar> = (0..count)
+    let bars: Vec<lumen_charts::chart_model::OhlcBar> = (0..count)
         .map(|i| {
             let base = i * 5;
-            chart_core::chart_model::OhlcBar {
+            lumen_charts::chart_model::OhlcBar {
                 time: data[base] as i64,
                 open: data[base + 1],
                 high: data[base + 2],
@@ -258,9 +258,9 @@ pub fn chart_set_data(data: &[f64]) {
 pub fn chart_set_series_type(series_type: u32) {
     with_chart(|chart| {
         chart.state.active_series_type = match series_type {
-            0 => chart_core::series::SeriesType::Ohlc,
-            1 => chart_core::series::SeriesType::Candlestick,
-            2 => chart_core::series::SeriesType::Line,
+            0 => lumen_charts::series::SeriesType::Ohlc,
+            1 => lumen_charts::series::SeriesType::Candlestick,
+            2 => lumen_charts::series::SeriesType::Line,
             _ => return false,
         };
         true
@@ -286,7 +286,7 @@ fn with_chart_ret<T: Default, F: FnOnce(&mut WasmChart) -> T>(f: F) -> T {
 pub fn chart_add_ohlc_series(data: &[f64]) -> u32 {
     let bars = parse_ohlc_data(data);
     with_chart_ret(|chart| {
-        let id = chart.state.series.add(chart_core::series::Series::ohlc(0, bars));
+        let id = chart.state.series.add(lumen_charts::series::Series::ohlc(0, bars));
         chart.state.update_price_scale();
         chart.render();
         id
@@ -298,7 +298,7 @@ pub fn chart_add_ohlc_series(data: &[f64]) -> u32 {
 pub fn chart_add_candlestick_series(data: &[f64]) -> u32 {
     let bars = parse_ohlc_data(data);
     with_chart_ret(|chart| {
-        let id = chart.state.series.add(chart_core::series::Series::candlestick(0, bars));
+        let id = chart.state.series.add(lumen_charts::series::Series::candlestick(0, bars));
         chart.state.update_price_scale();
         chart.render();
         id
@@ -310,7 +310,7 @@ pub fn chart_add_candlestick_series(data: &[f64]) -> u32 {
 pub fn chart_add_line_series(data: &[f64]) -> u32 {
     let pts = parse_line_data(data);
     with_chart_ret(|chart| {
-        let id = chart.state.series.add(chart_core::series::Series::line(0, pts));
+        let id = chart.state.series.add(lumen_charts::series::Series::line(0, pts));
         chart.state.update_price_scale();
         chart.render();
         id
@@ -322,7 +322,7 @@ pub fn chart_add_line_series(data: &[f64]) -> u32 {
 pub fn chart_add_area_series(data: &[f64]) -> u32 {
     let pts = parse_line_data(data);
     with_chart_ret(|chart| {
-        let id = chart.state.series.add(chart_core::series::Series::area(0, pts));
+        let id = chart.state.series.add(lumen_charts::series::Series::area(0, pts));
         chart.state.update_price_scale();
         chart.render();
         id
@@ -334,7 +334,7 @@ pub fn chart_add_area_series(data: &[f64]) -> u32 {
 pub fn chart_add_baseline_series(data: &[f64], base_value: f64) -> u32 {
     let pts = parse_line_data(data);
     with_chart_ret(|chart| {
-        let s = chart_core::series::Series::baseline(0, pts, base_value);
+        let s = lumen_charts::series::Series::baseline(0, pts, base_value);
         let id = chart.state.series.add(s);
         chart.state.update_price_scale();
         chart.render();
@@ -347,7 +347,7 @@ pub fn chart_add_baseline_series(data: &[f64], base_value: f64) -> u32 {
 pub fn chart_add_histogram_series(data: &[f64]) -> u32 {
     let pts = parse_histogram_data(data);
     with_chart_ret(|chart| {
-        let id = chart.state.series.add(chart_core::series::Series::histogram(0, pts));
+        let id = chart.state.series.add(lumen_charts::series::Series::histogram(0, pts));
         chart.state.update_price_scale();
         chart.render();
         id
@@ -378,7 +378,7 @@ pub fn chart_series_set_ohlc_data(series_id: u32, data: &[f64]) {
     let bars = parse_ohlc_data(data);
     with_chart(|chart| {
         if let Some(series) = chart.state.series.get_mut(series_id) {
-            series.data = chart_core::series::SeriesData::Ohlc(bars);
+            series.data = lumen_charts::series::SeriesData::Ohlc(bars);
             chart.state.update_price_scale();
             return true;
         }
@@ -392,7 +392,7 @@ pub fn chart_series_set_line_data(series_id: u32, data: &[f64]) {
     let pts = parse_line_data(data);
     with_chart(|chart| {
         if let Some(series) = chart.state.series.get_mut(series_id) {
-            series.data = chart_core::series::SeriesData::Line(pts);
+            series.data = lumen_charts::series::SeriesData::Line(pts);
             chart.state.update_price_scale();
             return true;
         }
@@ -406,7 +406,7 @@ pub fn chart_series_set_histogram_data(series_id: u32, data: &[f64]) {
     let pts = parse_histogram_data(data);
     with_chart(|chart| {
         if let Some(series) = chart.state.series.get_mut(series_id) {
-            series.data = chart_core::series::SeriesData::Histogram(pts);
+            series.data = lumen_charts::series::SeriesData::Histogram(pts);
             chart.state.update_price_scale();
             return true;
         }
@@ -419,10 +419,10 @@ pub fn chart_series_set_histogram_data(series_id: u32, data: &[f64]) {
 pub fn chart_series_update_ohlc_bar(series_id: u32, time: f64, open: f64, high: f64, low: f64, close: f64) {
     with_chart(|chart| {
         if let Some(series) = chart.state.series.get_mut(series_id) {
-            let bar = chart_core::chart_model::OhlcBar {
+            let bar = lumen_charts::chart_model::OhlcBar {
                 time: time as i64, open, high, low, close,
             };
-            if let chart_core::series::SeriesData::Ohlc(ref mut bars) = series.data {
+            if let lumen_charts::series::SeriesData::Ohlc(ref mut bars) = series.data {
                 match bars.binary_search_by_key(&bar.time, |b| b.time) {
                     Ok(idx) => bars[idx] = bar,
                     Err(idx) => bars.insert(idx, bar),
@@ -440,10 +440,10 @@ pub fn chart_series_update_ohlc_bar(series_id: u32, time: f64, open: f64, high: 
 pub fn chart_series_update_line_bar(series_id: u32, time: f64, value: f64) {
     with_chart(|chart| {
         if let Some(series) = chart.state.series.get_mut(series_id) {
-            let pt = chart_core::series::LineDataPoint {
+            let pt = lumen_charts::series::LineDataPoint {
                 time: time as i64, value,
             };
-            if let chart_core::series::SeriesData::Line(ref mut pts) = series.data {
+            if let lumen_charts::series::SeriesData::Line(ref mut pts) = series.data {
                 match pts.binary_search_by_key(&pt.time, |p| p.time) {
                     Ok(idx) => pts[idx] = pt,
                     Err(idx) => pts.insert(idx, pt),
@@ -463,9 +463,9 @@ pub fn chart_series_pop(series_id: u32, count: u32) {
         if let Some(series) = chart.state.series.get_mut(series_id) {
             for _ in 0..count {
                 match &mut series.data {
-                    chart_core::series::SeriesData::Ohlc(bars) => { bars.pop(); }
-                    chart_core::series::SeriesData::Line(pts) => { pts.pop(); }
-                    chart_core::series::SeriesData::Histogram(pts) => { pts.pop(); }
+                    lumen_charts::series::SeriesData::Ohlc(bars) => { bars.pop(); }
+                    lumen_charts::series::SeriesData::Line(pts) => { pts.pop(); }
+                    lumen_charts::series::SeriesData::Histogram(pts) => { pts.pop(); }
                 }
             }
             chart.state.update_price_scale();
@@ -481,7 +481,7 @@ pub fn chart_series_pop(series_id: u32, count: u32) {
 #[wasm_bindgen]
 pub fn chart_apply_options(json: &str) {
     with_chart(|chart| {
-        if let Ok(opts) = serde_json::from_str::<chart_core::chart_options::ChartOptions>(json) {
+        if let Ok(opts) = serde_json::from_str::<lumen_charts::chart_options::ChartOptions>(json) {
             chart.state.apply_options(opts);
             return true;
         }
@@ -525,7 +525,7 @@ pub fn chart_series_apply_options(series_id: u32, json: &str) {
 pub fn chart_series_create_price_line(series_id: u32, options_json: &str) -> u32 {
     with_chart_ret(|chart| {
         if let Some(series) = chart.state.series.get_mut(series_id) {
-            if let Ok(opts) = serde_json::from_str::<chart_core::series::PriceLineOptions>(options_json) {
+            if let Ok(opts) = serde_json::from_str::<lumen_charts::series::PriceLineOptions>(options_json) {
                 let id = series.next_price_line_id;
                 series.next_price_line_id += 1;
                 series.price_lines.push((id, opts));
@@ -648,9 +648,9 @@ pub fn chart_series_data_length(series_id: u32) -> u32 {
     with_chart_ret(|chart| {
         if let Some(series) = chart.state.series.get(series_id) {
             match &series.data {
-                chart_core::series::SeriesData::Ohlc(bars) => bars.len() as u32,
-                chart_core::series::SeriesData::Line(pts) => pts.len() as u32,
-                chart_core::series::SeriesData::Histogram(pts) => pts.len() as u32,
+                lumen_charts::series::SeriesData::Ohlc(bars) => bars.len() as u32,
+                lumen_charts::series::SeriesData::Line(pts) => pts.len() as u32,
+                lumen_charts::series::SeriesData::Histogram(pts) => pts.len() as u32,
             }
         } else {
             0
@@ -675,12 +675,12 @@ pub fn chart_pinch(scale: f32, center_x: f32, center_y: f32) {
 
 // --- Data parsing helpers ---
 
-fn parse_ohlc_data(data: &[f64]) -> Vec<chart_core::chart_model::OhlcBar> {
+fn parse_ohlc_data(data: &[f64]) -> Vec<lumen_charts::chart_model::OhlcBar> {
     let count = data.len() / 5;
     (0..count)
         .map(|i| {
             let base = i * 5;
-            chart_core::chart_model::OhlcBar {
+            lumen_charts::chart_model::OhlcBar {
                 time: data[base] as i64,
                 open: data[base + 1],
                 high: data[base + 2],
@@ -691,12 +691,12 @@ fn parse_ohlc_data(data: &[f64]) -> Vec<chart_core::chart_model::OhlcBar> {
         .collect()
 }
 
-fn parse_line_data(data: &[f64]) -> Vec<chart_core::series::LineDataPoint> {
+fn parse_line_data(data: &[f64]) -> Vec<lumen_charts::series::LineDataPoint> {
     let count = data.len() / 2;
     (0..count)
         .map(|i| {
             let base = i * 2;
-            chart_core::series::LineDataPoint {
+            lumen_charts::series::LineDataPoint {
                 time: data[base] as i64,
                 value: data[base + 1],
             }
@@ -704,12 +704,12 @@ fn parse_line_data(data: &[f64]) -> Vec<chart_core::series::LineDataPoint> {
         .collect()
 }
 
-fn parse_histogram_data(data: &[f64]) -> Vec<chart_core::series::HistogramDataPoint> {
+fn parse_histogram_data(data: &[f64]) -> Vec<lumen_charts::series::HistogramDataPoint> {
     let count = data.len() / 2;
     (0..count)
         .map(|i| {
             let base = i * 2;
-            chart_core::series::HistogramDataPoint {
+            lumen_charts::series::HistogramDataPoint {
                 time: data[base] as i64,
                 value: data[base + 1],
                 color: None,

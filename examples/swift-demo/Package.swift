@@ -17,7 +17,7 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags([
                     "-L", "../../core/target/release",
-                    "-lchart_core",
+                    "-llumen_charts",
                 ]),
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("Metal"),

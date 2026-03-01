@@ -1,7 +1,7 @@
 /// Parity tests from LWC: tests/unittests/color.spec.ts
 ///
 /// Contrast color generation and gradient interpolation.
-/// Inline implementations — will be moved to chart_core::color module in Slice 6.
+/// Inline implementations — will be moved to lumen_charts::color module in Slice 6.
 
 #[derive(Debug, Clone, PartialEq)]
 struct Rgba {

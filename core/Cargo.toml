@@ -1,7 +1,10 @@
 [package]
-name = "chart-core"
+name = "lumen-charts"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+authors = ["Jagtesh Chadha"]
+description = "GPU-accelerated charting library inspired by Lightweight Charts"
 
 [lib]
 crate-type = ["cdylib", "lib"]

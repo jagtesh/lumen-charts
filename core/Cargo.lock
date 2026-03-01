@@ -185,22 +185,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
-name = "chart-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "env_logger",
- "log",
- "parley",
- "pollster",
- "serde",
- "serde_json",
- "skrifa 0.26.6",
- "vello",
- "vello_encoding",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -807,6 +791,22 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "lumen-charts"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "env_logger",
+ "log",
+ "parley",
+ "pollster",
+ "serde",
+ "serde_json",
+ "skrifa 0.26.6",
+ "vello",
+ "vello_encoding",
+]
 
 [[package]]
 name = "malloc_buf"

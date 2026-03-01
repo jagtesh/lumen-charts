@@ -1,6 +1,6 @@
-# Lightweight Charts — Rust Core
+# Lumen Charts
 
-GPU-accelerated charting library built on [Vello](https://github.com/linebender/vello), with API parity to [Lightweight Charts](https://github.com/nicjbrow/lightweight-charts).
+GPU-accelerated charting library built on [Vello](https://github.com/linebender/vello), inspired by [Lightweight Charts](https://github.com/nicjbrow/lightweight-charts).
 
 ## Project Structure
 
@@ -48,3 +48,7 @@ The **core** is a platform-agnostic Rust library that exposes a C-ABI. It handle
 **SDKs** wrap the C-ABI with idiomatic, type-safe APIs for each platform.
 
 **Examples** are runnable demos that showcase the SDK usage.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
