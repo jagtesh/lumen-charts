@@ -120,6 +120,82 @@ Both the Swift and WASM demos support:
 - **Toggle Overlay** — add/remove an Area series on the main pane
 - **Toggle MACD** — add/remove a MACD indicator (histogram + 2 lines) in a separate pane
 
+## Platform Support
+
+The core uses `wgpu` with automatic backend selection (`Backends::all()`). No
+configuration is needed — the best GPU API is chosen at runtime:
+
+| Platform       | GPU Backend | Surface Source           | Status        |
+|----------------|-------------|--------------------------|---------------|
+| macOS / iOS    | Metal       | `CAMetalLayer`           | ✅ Supported  |
+| Browser (WASM) | WebGPU      | `<canvas>` element       | ✅ Supported  |
+| Windows        | DX12/Vulkan | `HWND`                   | 🔧 Needs SDK  |
+| Linux          | Vulkan      | Wayland/X11 surface      | 🔧 Needs SDK  |
+| Android        | Vulkan      | `ANativeWindow`          | 🔧 Needs SDK  |
+
+### Windows (Win32 / HWND)
+
+To embed a chart in a Win32 window, you'd create a `chart_create` variant that
+accepts an `HWND`. The core already links against DX12/Vulkan automatically — only
+the surface creation entry point needs to be platform-specific:
+
+```c
+#include "chart_core.h"
+#include <windows.h>
+
+// Hypothetical entry point (not yet implemented):
+// Chart* chart_create_win32(HWND hwnd, uint32_t width, uint32_t height, float scale);
+
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    static Chart* chart = NULL;
+    switch (msg) {
+        case WM_CREATE:
+            chart = chart_create_win32(hwnd, 900, 500, 1.0f);
+            // Load data, set options...
+            break;
+        case WM_PAINT:
+            chart_render_if_needed(chart);
+            break;
+        case WM_MOUSEMOVE:
+            chart_pointer_move(chart, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+            break;
+    }
+    return DefWindowProc(hwnd, msg, wp, lp);
+}
+```
+
+### Linux (GTK4 + GDK / Wayland)
+
+For GTK4 apps, you'd obtain the native Wayland or X11 surface from GDK and pass
+it to a Linux-specific `chart_create` variant:
+
+```c
+#include "chart_core.h"
+#include <gtk/gtk.h>
+
+// Hypothetical entry point (not yet implemented):
+// Chart* chart_create_wayland(void* wl_surface, uint32_t w, uint32_t h, float scale);
+// Chart* chart_create_x11(uint32_t window_id, uint32_t w, uint32_t h, float scale);
+
+static void on_realize(GtkWidget *widget, gpointer data) {
+    GdkSurface *gdk_surface = gtk_native_get_surface(GTK_NATIVE(widget));
+
+    // For Wayland:
+    struct wl_surface *wl = gdk_wayland_surface_get_wl_surface(gdk_surface);
+    Chart *chart = chart_create_wayland(wl, 900, 500, 1.0f);
+
+    // All subsequent API calls are the same across all platforms:
+    // chart_set_data(chart, data, len);
+    // chart_fit_content(chart);
+    // chart_pointer_move(chart, x, y);  etc.
+}
+```
+
+> **Note:** The rendering pipeline (Vello → wgpu → GPU) and the entire C-ABI are
+> identical across all platforms. Only the surface creation function differs per
+> platform. All `chart_*` functions work the same everywhere once the `Chart*` is
+> created.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
