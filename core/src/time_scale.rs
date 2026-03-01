@@ -53,7 +53,7 @@ impl TimeScale {
 
     /// Compute the scroll_offset that would place `first` as the first visible index.
     /// This is the inverse of `first_visible_index()`.
-    fn scroll_offset_for_first(&self, first: f32, plot_width: f32) -> f32 {
+    pub fn scroll_offset_for_first(&self, first: f32, plot_width: f32) -> f32 {
         let visible = plot_width / self.bar_spacing;
         first - self.bar_count as f32 + visible
     }
@@ -116,7 +116,7 @@ impl TimeScale {
         self.clamp_scroll();
     }
 
-    fn clamp_scroll(&mut self) {
+    pub fn clamp_scroll(&mut self) {
         // Negative = scrolled into history, positive = past the end
         let max_history = (self.bar_count as f32).max(0.0);
         self.scroll_offset = self.scroll_offset.clamp(-max_history, 10.0);

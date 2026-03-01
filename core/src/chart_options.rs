@@ -104,6 +104,8 @@ pub struct PriceScaleOptions {
     pub format: PriceFormatOptions,
     /// Text color
     pub text_color: [f32; 4],
+    /// Price scale mode: "normal" or "logarithmic"
+    pub mode: String,
 }
 
 impl Default for PriceScaleOptions {
@@ -113,6 +115,7 @@ impl Default for PriceScaleOptions {
             auto_scale: true,
             format: PriceFormatOptions::default(),
             text_color: [0.6, 0.6, 0.7, 1.0],
+            mode: "normal".to_string(),
         }
     }
 }
@@ -129,6 +132,12 @@ pub struct TimeScaleOptions {
     pub min_bar_spacing: f32,
     /// Maximum bar spacing (pixels)
     pub max_bar_spacing: f32,
+    /// Right offset (bars of empty space at the right edge)
+    pub right_offset: f32,
+    /// Whether bar spacing is fixed (prevents zooming)
+    pub fix_left_edge: bool,
+    /// Whether to lock the visible range to the right edge
+    pub lock_visible_time_range_on_resize: bool,
 }
 
 impl Default for TimeScaleOptions {
@@ -139,6 +148,9 @@ impl Default for TimeScaleOptions {
             text_color: [0.6, 0.6, 0.7, 1.0],
             min_bar_spacing: 1.0,
             max_bar_spacing: 30.0,
+            right_offset: 0.0,
+            fix_left_edge: false,
+            lock_visible_time_range_on_resize: false,
         }
     }
 }
@@ -179,6 +191,32 @@ impl Default for LayoutOptions {
     }
 }
 
+/// Localization options — configures default date/time/price formatters.
+///
+/// Custom formatting callbacks (like LWC's `localization.priceFormatter`)
+/// are registered via dedicated C-ABI functions rather than through this
+/// serializable config, since closures can't be serialized.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocalizationOptions {
+    /// Locale identifier (e.g., "en-US", "de-DE")
+    pub locale: String,
+    /// Date format pattern for chrono (e.g., "%Y-%m-%d")
+    pub date_format: String,
+    /// Time format pattern for chrono (e.g., "%H:%M:%S")
+    pub time_format: String,
+}
+
+impl Default for LocalizationOptions {
+    fn default() -> Self {
+        LocalizationOptions {
+            locale: "en-US".to_string(),
+            date_format: "%Y-%m-%d".to_string(),
+            time_format: "%H:%M:%S".to_string(),
+        }
+    }
+}
+
 /// Top-level chart options
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -189,6 +227,7 @@ pub struct ChartOptions {
     pub price_scale: PriceScaleOptions,
     pub time_scale: TimeScaleOptions,
     pub series_colors: SeriesColors,
+    pub localization: LocalizationOptions,
 }
 /// Merge a partial JSON object into a full JSON object recursively.
 pub fn merge_json(target: &mut serde_json::Value, source: serde_json::Value) {

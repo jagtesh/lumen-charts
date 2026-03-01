@@ -1570,4 +1570,441 @@ mod native {
             false
         }
     }
+
+    // ===================================================================
+    // IChartApi — options getter
+    // ===================================================================
+
+    /// Get current chart options as JSON string.
+    /// Caller must free the returned string with chart_free_string.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_get_options(chart: *const Chart) -> *mut std::os::raw::c_char {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        let json = serde_json::to_string(&chart.state.options).unwrap_or_default();
+        std::ffi::CString::new(json).unwrap_or_default().into_raw()
+    }
+
+    /// Free a string returned by chart_get_options.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_free_string(s: *mut std::os::raw::c_char) {
+        if !s.is_null() {
+            unsafe {
+                let _ = std::ffi::CString::from_raw(s);
+            }
+        }
+    }
+
+    // ===================================================================
+    // ITimeScaleApi
+    // ===================================================================
+
+    /// Scroll to a specific bar position (fractional index from the right).
+    /// position > 0 = empty space at right, < 0 = scrolled into history.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_time_scale_scroll_to_position(
+        chart: *mut Chart,
+        position: f32,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.time_scale.scroll_offset = position;
+        chart.state.time_scale.clamp_scroll();
+        chart
+            .state
+            .pending_mask
+            .set_global(crate::invalidation::InvalidationLevel::Light);
+        true
+    }
+
+    /// Scroll so the last bar is visible (right edge).
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_time_scale_scroll_to_real_time(chart: *mut Chart) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.time_scale.scroll_offset = 0.0;
+        chart
+            .state
+            .pending_mask
+            .set_global(crate::invalidation::InvalidationLevel::Light);
+        true
+    }
+
+    /// Get the visible time range (start_time, end_time) as unix timestamps.
+    /// Returns true if data exists, writing to out pointers.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_time_scale_get_visible_range(
+        chart: *const Chart,
+        out_start: *mut i64,
+        out_end: *mut i64,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        if chart.state.data.bars.is_empty() {
+            return false;
+        }
+        let (first, last) = chart
+            .state
+            .time_scale
+            .visible_range(chart.state.layout.plot_area.width);
+        let start_time = chart
+            .state
+            .data
+            .bars
+            .get(first)
+            .map(|b| b.time)
+            .unwrap_or(0);
+        let end_time = chart
+            .state
+            .data
+            .bars
+            .get(last.saturating_sub(1))
+            .map(|b| b.time)
+            .unwrap_or(0);
+        unsafe {
+            if !out_start.is_null() {
+                *out_start = start_time;
+            }
+            if !out_end.is_null() {
+                *out_end = end_time;
+            }
+        }
+        true
+    }
+
+    /// Set the visible time range by start/end timestamps.
+    /// Adjusts bar spacing and scroll offset to fit the range.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_time_scale_set_visible_range(
+        chart: *mut Chart,
+        start_time: i64,
+        end_time: i64,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if chart.state.data.bars.is_empty() {
+            return false;
+        }
+        // Find bar indices for start and end times
+        let start_idx = chart
+            .state
+            .data
+            .bars
+            .binary_search_by_key(&start_time, |b| b.time)
+            .unwrap_or_else(|i| i);
+        let end_idx = chart
+            .state
+            .data
+            .bars
+            .binary_search_by_key(&end_time, |b| b.time)
+            .unwrap_or_else(|i| i);
+        let visible_bars = (end_idx as f32 - start_idx as f32).max(1.0);
+        let plot_width = chart.state.layout.plot_area.width;
+        chart.state.time_scale.bar_spacing = (plot_width / visible_bars).clamp(2.0, 50.0);
+        let scroll = chart
+            .state
+            .time_scale
+            .scroll_offset_for_first(start_idx as f32, plot_width);
+        chart.state.time_scale.scroll_offset = scroll;
+        chart.state.time_scale.clamp_scroll();
+        chart.state.update_price_scale();
+        chart
+            .state
+            .pending_mask
+            .set_global(crate::invalidation::InvalidationLevel::Light);
+        true
+    }
+
+    /// Get the visible logical range (first_bar_index, last_bar_index) as f64.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_time_scale_get_visible_logical_range(
+        chart: *const Chart,
+        out_first: *mut f64,
+        out_last: *mut f64,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        let plot_width = chart.state.layout.plot_area.width;
+        let first = chart.state.time_scale.first_visible_index(plot_width) as f64;
+        let last = chart.state.time_scale.last_visible_index(plot_width) as f64;
+        unsafe {
+            if !out_first.is_null() {
+                *out_first = first;
+            }
+            if !out_last.is_null() {
+                *out_last = last;
+            }
+        }
+        true
+    }
+
+    /// Set the visible logical range by first/last bar indices.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_time_scale_set_visible_logical_range(
+        chart: *mut Chart,
+        first: f64,
+        last: f64,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        let visible_bars = (last - first).max(1.0) as f32;
+        let plot_width = chart.state.layout.plot_area.width;
+        chart.state.time_scale.bar_spacing = (plot_width / visible_bars).clamp(2.0, 50.0);
+        let scroll = chart
+            .state
+            .time_scale
+            .scroll_offset_for_first(first as f32, plot_width);
+        chart.state.time_scale.scroll_offset = scroll;
+        chart.state.time_scale.clamp_scroll();
+        chart.state.update_price_scale();
+        chart
+            .state
+            .pending_mask
+            .set_global(crate::invalidation::InvalidationLevel::Light);
+        true
+    }
+
+    /// Reset time scale to default (fit content).
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_time_scale_reset(chart: *mut Chart) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        chart.state.fit_content()
+    }
+
+    /// Get the time scale width in logical pixels.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_time_scale_width(chart: *const Chart) -> f32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        chart.state.layout.plot_area.width
+    }
+
+    /// Get the time scale height in logical pixels.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_time_scale_height(chart: *const Chart) -> f32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        chart.state.layout.plot_area.height
+    }
+
+    // ===================================================================
+    // ISeriesApi — seriesType, dataByIndex
+    // ===================================================================
+
+    /// Get the series type as u8: 0=Ohlc, 1=Candlestick, 2=Line, 3=Area, 4=Baseline, 5=Histogram
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_series_type(chart: *const Chart, series_id: u32) -> i32 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        if let Some(s) = chart.state.series.get(series_id) {
+            match s.series_type {
+                crate::series::SeriesType::Ohlc => 0,
+                crate::series::SeriesType::Candlestick => 1,
+                crate::series::SeriesType::Line => 2,
+                crate::series::SeriesType::Area => 3,
+                crate::series::SeriesType::Baseline => 4,
+                crate::series::SeriesType::Histogram => 5,
+            }
+        } else {
+            -1 // not found
+        }
+    }
+
+    /// Get bar data by index for primary data. Returns OHLC values.
+    /// Returns true if index is valid.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_data_by_index(
+        chart: *const Chart,
+        index: u32,
+        out_time: *mut i64,
+        out_open: *mut f64,
+        out_high: *mut f64,
+        out_low: *mut f64,
+        out_close: *mut f64,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        if let Some(bar) = chart.state.data.bars.get(index as usize) {
+            unsafe {
+                if !out_time.is_null() {
+                    *out_time = bar.time;
+                }
+                if !out_open.is_null() {
+                    *out_open = bar.open;
+                }
+                if !out_high.is_null() {
+                    *out_high = bar.high;
+                }
+                if !out_low.is_null() {
+                    *out_low = bar.low;
+                }
+                if !out_close.is_null() {
+                    *out_close = bar.close;
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    // ===================================================================
+    // IPriceScaleApi
+    // ===================================================================
+
+    /// Get the price scale mode: 0 = Normal, 1 = Logarithmic.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_price_scale_get_mode(chart: *const Chart, pane_index: u32) -> u8 {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        if let Some(pane) = chart.state.panes.get(pane_index as usize) {
+            match pane.price_scale.mode {
+                crate::price_scale::PriceScaleMode::Normal => 0,
+                crate::price_scale::PriceScaleMode::Logarithmic => 1,
+            }
+        } else {
+            0
+        }
+    }
+
+    /// Set the price scale mode: 0 = Normal, 1 = Logarithmic.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_price_scale_set_mode(
+        chart: *mut Chart,
+        pane_index: u32,
+        mode: u8,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &mut *chart
+        };
+        if let Some(pane) = chart.state.panes.get_mut(pane_index as usize) {
+            pane.price_scale.mode = match mode {
+                1 => crate::price_scale::PriceScaleMode::Logarithmic,
+                _ => crate::price_scale::PriceScaleMode::Normal,
+            };
+            chart
+                .state
+                .pending_mask
+                .set_global(crate::invalidation::InvalidationLevel::Full);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get the current visible price range for a pane.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_price_scale_get_range(
+        chart: *const Chart,
+        pane_index: u32,
+        out_min: *mut f64,
+        out_max: *mut f64,
+    ) -> bool {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        if let Some(pane) = chart.state.panes.get(pane_index as usize) {
+            unsafe {
+                if !out_min.is_null() {
+                    *out_min = pane.price_scale.min_price;
+                }
+                if !out_max.is_null() {
+                    *out_max = pane.price_scale.max_price;
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    // ===================================================================
+    // Localization — format helpers
+    // ===================================================================
+
+    /// Format a price using the chart's localization options.
+    /// Caller must free with chart_free_string.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_format_price(
+        chart: *const Chart,
+        price: f64,
+    ) -> *mut std::os::raw::c_char {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        let formatted = chart.state.options.price_scale.format.format(price);
+        std::ffi::CString::new(formatted)
+            .unwrap_or_default()
+            .into_raw()
+    }
+
+    /// Format a timestamp using the chart's localization date format.
+    /// Caller must free with chart_free_string.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_format_date(
+        chart: *const Chart,
+        timestamp: i64,
+    ) -> *mut std::os::raw::c_char {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        let formatted = crate::formatters::format_date_custom(
+            timestamp,
+            &chart.state.options.localization.date_format,
+        );
+        std::ffi::CString::new(formatted)
+            .unwrap_or_default()
+            .into_raw()
+    }
+
+    /// Format a timestamp using the chart's localization time format.
+    /// Caller must free with chart_free_string.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chart_format_time(
+        chart: *const Chart,
+        timestamp: i64,
+    ) -> *mut std::os::raw::c_char {
+        let chart = unsafe {
+            assert!(!chart.is_null());
+            &*chart
+        };
+        let formatted = crate::formatters::format_time_custom(
+            timestamp,
+            &chart.state.options.localization.time_format,
+        );
+        std::ffi::CString::new(formatted)
+            .unwrap_or_default()
+            .into_raw()
+    }
 }
