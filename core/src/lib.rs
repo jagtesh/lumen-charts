@@ -20,8 +20,9 @@ mod native {
     use std::ffi::c_void;
 
     use crate::chart_model::ChartData;
-    use crate::chart_renderer::render_chart;
+    use crate::chart_renderer::{render_bottom_scene, render_crosshair_scene};
     use crate::chart_state::ChartState;
+    
 
     use vello::wgpu;
     use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
@@ -47,6 +48,10 @@ mod native {
         surface: wgpu::Surface<'static>,
         surface_config: wgpu::SurfaceConfiguration,
         vello_renderer: VelloRenderer,
+
+        /// Cached bottom scene (background + grid + series + axes).
+        /// Reused when only the crosshair changes.
+        cached_bottom_scene: Option<Scene>,
 
         click_cb: Option<(ChartEventCallback, *mut c_void)>,
         crosshair_move_cb: Option<(ChartEventCallback, *mut c_void)>,
@@ -137,6 +142,7 @@ mod native {
             surface,
             surface_config,
             vello_renderer,
+            cached_bottom_scene: None,
             click_cb: None,
             crosshair_move_cb: None,
             dbl_click_cb: None,
@@ -154,13 +160,38 @@ mod native {
 
         // Consume the pending invalidation mask
         let mask = chart.state.consume_mask();
+        let level = mask.global_level();
+
         if !mask.needs_redraw() {
             // Nothing changed since last render — skip entirely
+            chart.state.skipped_render_count += 1;
             return;
         }
 
         chart.scene.reset();
-        render_chart(&mut chart.scene, &chart.state);
+
+        if level.needs_bottom_scene() {
+            // Light or Full — rebuild the bottom scene
+            let mut bottom = Scene::new();
+            render_bottom_scene(&mut bottom, &chart.state);
+            chart.cached_bottom_scene = Some(bottom.clone());
+            chart.scene.append(&bottom, None);
+            chart.state.bottom_render_count += 1;
+        } else if let Some(ref cached) = chart.cached_bottom_scene {
+            // Cursor only — reuse cached bottom scene
+            chart.scene.append(cached, None);
+        } else {
+            // No cache yet — must do full render
+            let mut bottom = Scene::new();
+            render_bottom_scene(&mut bottom, &chart.state);
+            chart.cached_bottom_scene = Some(bottom.clone());
+            chart.scene.append(&bottom, None);
+            chart.state.bottom_render_count += 1;
+        }
+
+        // Always render crosshair on top
+        render_crosshair_scene(&mut chart.scene, &chart.state);
+        chart.state.crosshair_render_count += 1;
 
         let surface_texture = match chart.surface.get_current_texture() {
             Ok(t) => t,

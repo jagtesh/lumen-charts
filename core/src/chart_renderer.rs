@@ -18,8 +18,16 @@ const TEXT_COLOR: Color = Color::new([0.6, 0.6, 0.7, 1.0]);
 const CROSSHAIR_COLOR: Color = Color::new([0.5, 0.5, 0.6, 0.8]);
 const LABEL_FONT_SIZE: f32 = 11.0;
 
-/// Render the entire chart from ChartState into a Vello Scene
+/// Render the entire chart from ChartState into a Vello Scene.
+/// This is the legacy entry point — always renders everything.
 pub fn render_chart(scene: &mut Scene, state: &ChartState) {
+    render_bottom_scene(scene, state);
+    render_crosshair_scene(scene, state);
+}
+
+/// Render the "bottom" scene: background, grid, series, axes, overlays.
+/// This is the expensive part that should be cached when only the crosshair moves.
+pub fn render_bottom_scene(scene: &mut Scene, state: &ChartState) {
     if state.data.bars.is_empty() {
         return;
     }
@@ -109,8 +117,13 @@ pub fn render_chart(scene: &mut Scene, state: &ChartState) {
 
     draw_y_axis(scene, state, layout, &font, t);
     draw_x_axis(scene, &time_ticks, layout, &font, t);
+}
 
-    if state.crosshair.visible {
+/// Render only the crosshair layer. This is cheap — just 2 dashed lines + labels.
+pub fn render_crosshair_scene(scene: &mut Scene, state: &ChartState) {
+    if state.crosshair.visible && !state.data.bars.is_empty() {
+        let font = chart_font();
+        let t = Affine::scale(state.layout.scale_factor);
         draw_crosshair(scene, state, &font, t);
     }
 }

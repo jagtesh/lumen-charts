@@ -164,6 +164,14 @@ pub struct ChartState {
 
     /// Counter for auto-incrementing pane IDs
     next_pane_id: u32,
+
+    // --- Render counters (for testing and profiling) ---
+    /// Number of full bottom-scene renders (background + grid + series + axes)
+    pub bottom_render_count: u64,
+    /// Number of crosshair-only renders
+    pub crosshair_render_count: u64,
+    /// Number of renders skipped due to None mask
+    pub skipped_render_count: u64,
 }
 
 impl ChartState {
@@ -203,6 +211,9 @@ impl ChartState {
             pending_events: InteractionEvents::default(),
             pending_mask: InvalidateMask::full(), // first render needs full paint
             next_pane_id: 1,                      // pane 0 is already created
+            bottom_render_count: 0,
+            crosshair_render_count: 0,
+            skipped_render_count: 0,
         };
         state.update_panes_layout();
         state
