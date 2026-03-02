@@ -86,6 +86,30 @@ The **core** is a platform-agnostic Rust library that exposes a C-ABI. It handle
 
 **Examples** are runnable demos that showcase the SDK usage.
 
+## API Completeness
+
+Lumen Charts targets **full parity** with [Lightweight Charts v4](https://tradingview.github.io/lightweight-charts/). Current coverage:
+
+| Interface | Coverage | Notes |
+|---|---|---|
+| `IChartApi` | 80% | `addCustomSeries` and `takeScreenshot` deferred |
+| `ISeriesApi` | **100%** ✅ | All methods including `setMarkers`, `barsInLogicalRange` |
+| `ITimeScaleApi` | **100%** ✅ | All methods including event subscriptions |
+| `IPriceScaleApi` | **100%** ✅ | All methods including `applyOptions`, `width`, `options` |
+| **Overall** | **94%** | [Full audit →](assets/lwc-parity.md) |
+
+All options use **JSON** across the C-ABI boundary — the same `applyOptions(json)` / `options() → json` pattern works everywhere (chart, series, time scale, price scale).
+
+### Beyond Lightweight Charts
+
+Lumen Charts also provides features **not available** in Lightweight Charts:
+
+- **Multi-pane layout** — `addPane`, `removePane`, `swapPanes`, `moveToPane`
+- **Touch gesture recognition** — tap, long-press, pan, pinch-to-zoom
+- **Invalidation-driven rendering** — `renderIfNeeded()` skips GPU work when nothing changed
+- **Keyboard navigation** — arrow keys, +/−, Home/End
+- **Series pop** — efficiently remove the last N data points
+
 ## JavaScript API (WASM)
 
 The WASM SDK includes `chart_api.js`, a JavaScript wrapper that mirrors the

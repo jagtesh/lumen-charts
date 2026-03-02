@@ -160,6 +160,7 @@ uint32_t chart_series_bars_in_logical_range(const Chart* chart, uint32_t series_
 // IPriceScaleApi
 bool chart_price_scale_apply_options(Chart* chart, const char* json_cstr);
 float chart_price_scale_width(const Chart* chart);
+const char* chart_price_scale_get_options(const Chart* chart);
 
 // ITimeScaleApi: applyOptions
 bool chart_time_scale_apply_options(Chart* chart, const char* json_cstr);

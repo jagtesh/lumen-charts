@@ -2313,6 +2313,31 @@ pub extern "C" fn chart_price_scale_width(chart: *const Chart) -> f32 {
     chart.state.layout.margins.right
 }
 
+/// Get the current price scale options/state as a JSON string.
+/// Returns: {"mode":"normal"|"logarithmic","minPrice":..,"maxPrice":..,"width":..}
+/// Caller must free with chart_free_string.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_price_scale_get_options(chart: *const Chart) -> *mut std::os::raw::c_char {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &*chart
+    };
+    let ps = &chart.state.panes[0].price_scale;
+    let mode_str = match ps.mode {
+        crate::price_scale::PriceScaleMode::Normal => "normal",
+        crate::price_scale::PriceScaleMode::Logarithmic => "logarithmic",
+    };
+    let json = serde_json::json!({
+        "mode": mode_str,
+        "minPrice": ps.min_price,
+        "maxPrice": ps.max_price,
+        "width": chart.state.layout.margins.right,
+    });
+    std::ffi::CString::new(json.to_string())
+        .unwrap_or_default()
+        .into_raw()
+}
+
 // ----- ITimeScaleApi: applyOptions -----
 
 /// Apply options to the time scale via JSON.
