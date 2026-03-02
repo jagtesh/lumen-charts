@@ -38,6 +38,65 @@ possible, making migration straightforward:
     └── web-demo/       Browser demo (HTML + WebGPU)
 ```
 
+## Installation
+
+### Rust (crates.io)
+
+```toml
+[dependencies]
+lumen-charts = "1.1"
+```
+
+### Swift (Swift Package Manager)
+
+Add Lumen Charts as a dependency in your `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/jagtesh/lumen-charts.git", from: "1.1.0"),
+],
+targets: [
+    .target(
+        name: "YourApp",
+        dependencies: [
+            .product(name: "LightweightCharts", package: "lumen-charts"),
+        ]
+    ),
+]
+```
+
+> **Note:** The Swift SDK wraps the C-ABI via `CChartCore`. You must first build the
+> native library (`cd core && cargo build --release`) before `swift build` can link it.
+
+### WASM / JavaScript
+
+The WASM SDK requires building from source via `wasm-pack`:
+
+```bash
+git clone https://github.com/jagtesh/lumen-charts.git
+cd lumen-charts/sdks/wasm
+wasm-pack build --target web
+```
+
+This produces a `pkg/` directory you can import in your JavaScript:
+
+```javascript
+import { createChart } from './pkg/chart_api.js';
+const chart = await createChart(document.getElementById('container'));
+```
+
+> Requires a browser with WebGPU support (Chrome 113+, Safari 18+).
+
+### C / C++ / Other Languages
+
+Use the C-ABI directly via the header file. Build the static library and link it:
+
+```bash
+cd core && cargo build --release
+# Link against target/release/liblumen_charts.a (or .dylib / .dll)
+# Include core/include/chart_core.h
+```
+
 ## Quick Start
 
 ### Build the Core Library
