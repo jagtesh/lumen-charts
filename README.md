@@ -99,33 +99,38 @@ cd core && cargo build --release
 
 ## Quick Start
 
+```bash
+git clone https://github.com/jagtesh/lumen-charts.git
+cd lumen-charts
+```
+
 ### Build the Core Library
 
 ```bash
-cd core && cargo build --release
+make            # builds core/target/release/liblumen_charts.a
 ```
 
 ### Run the Swift Demo
 
 ```bash
-cd core && cargo build --release
-cd ../examples/swift-demo && swift run ChartDemo
+make swift-demo # builds Rust core → syncs C header → runs the Swift demo
 ```
+
+> Override the library path with `LUMEN_LIB_PATH=/custom/path make swift-demo`
 
 ### Run the WASM / WebGPU Demo
 
 ```bash
-cd examples/web-demo && ./run.sh
-# Opens at http://localhost:8080 (Chrome 113+ or Safari 18+ for WebGPU)
+make wasm                           # builds the WASM SDK
+cd examples/web-demo && ./run.sh    # starts local server at http://localhost:8080
 ```
 
-The build script compiles the Rust core to WebAssembly via `wasm-pack`, copies the
-JS API wrapper into the output `pkg/` directory, and starts a local HTTP server.
+> Requires Chrome 113+ or Safari 18+ for WebGPU.
 
 ### Run Tests
 
 ```bash
-cd core && cargo test
+make test       # runs all 265 tests (unit + integration + parity + C-ABI callback)
 ```
 
 ## Architecture
