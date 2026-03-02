@@ -107,13 +107,13 @@ cd lumen-charts
 ### Build the Core Library
 
 ```bash
-make            # builds core/target/release/liblumen_charts.a
+make core-libs    # builds core/target/release/liblumen_charts.a
 ```
 
 ### Run the Swift Demo
 
 ```bash
-make swift-demo # builds Rust core → syncs C header → runs the Swift demo
+make swift-demo   # core-libs → sync header → run Swift demo
 ```
 
 > Override the library path with `LUMEN_LIB_PATH=/custom/path make swift-demo`
@@ -121,8 +121,7 @@ make swift-demo # builds Rust core → syncs C header → runs the Swift demo
 ### Run the WASM / WebGPU Demo
 
 ```bash
-make wasm                           # builds the WASM SDK
-cd examples/web-demo && ./run.sh    # starts local server at http://localhost:8080
+make wasm-demo    # builds WASM SDK → starts local server at http://localhost:8080
 ```
 
 > Requires Chrome 113+ or Safari 18+ for WebGPU.
@@ -130,7 +129,7 @@ cd examples/web-demo && ./run.sh    # starts local server at http://localhost:80
 ### Run Tests
 
 ```bash
-make test       # runs all 265 tests (unit + integration + parity + C-ABI callback)
+make test         # runs all 265 tests (unit + integration + parity + C-ABI callback)
 ```
 
 ## Architecture
