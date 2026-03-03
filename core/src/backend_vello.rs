@@ -6,7 +6,7 @@ use vello::kurbo::{Affine, BezPath, Circle, Line, Rect as KurboRect, Stroke};
 use vello::peniko::{self, Brush, Color, Fill, Gradient};
 use vello::Scene;
 
-use crate::draw_backend::{Color4, DrawBackend, GradientStop};
+use crate::draw_backend::{Color as ChartColor, DrawBackend, GradientStop};
 use crate::text_render;
 
 /// Vello-based backend: accumulates draw commands into a Scene.
@@ -45,8 +45,8 @@ impl VelloBackend {
     }
 }
 
-fn c4_to_color(c: Color4) -> Color {
-    Color::new(c)
+fn c4_to_color(c: ChartColor) -> Color {
+    Color::new(c.0)
 }
 
 fn stops_to_gradient(y_start: f64, y_end: f64, stops: &[GradientStop]) -> Brush {
@@ -90,7 +90,7 @@ impl DrawBackend for VelloBackend {
         self.scale = Affine::scale_non_uniform(sx, sy);
     }
 
-    fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color4) {
+    fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: ChartColor) {
         self.scene.fill(
             Fill::NonZero,
             self.scale,
@@ -120,7 +120,7 @@ impl DrawBackend for VelloBackend {
         );
     }
 
-    fn stroke_line(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, color: Color4, width: f64) {
+    fn stroke_line(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, color: ChartColor, width: f64) {
         self.scene.stroke(
             &Stroke::new(width),
             self.scale,
@@ -136,7 +136,7 @@ impl DrawBackend for VelloBackend {
         y0: f64,
         x1: f64,
         y1: f64,
-        color: Color4,
+        color: ChartColor,
         width: f64,
         dash_len: f64,
         gap_len: f64,
@@ -151,7 +151,7 @@ impl DrawBackend for VelloBackend {
         );
     }
 
-    fn stroke_path(&mut self, points: &[(f64, f64)], color: Color4, width: f64) {
+    fn stroke_path(&mut self, points: &[(f64, f64)], color: ChartColor, width: f64) {
         let path = build_path(points, false);
         self.scene.stroke(
             &Stroke::new(width),
@@ -162,7 +162,7 @@ impl DrawBackend for VelloBackend {
         );
     }
 
-    fn fill_path(&mut self, points: &[(f64, f64)], color: Color4) {
+    fn fill_path(&mut self, points: &[(f64, f64)], color: ChartColor) {
         let path = build_path(points, true);
         self.scene
             .fill(Fill::NonZero, self.scale, c4_to_color(color), None, &path);
@@ -181,7 +181,7 @@ impl DrawBackend for VelloBackend {
             .fill(Fill::NonZero, self.scale, &brush, None, &path);
     }
 
-    fn fill_circle(&mut self, cx: f64, cy: f64, radius: f64, color: Color4) {
+    fn fill_circle(&mut self, cx: f64, cy: f64, radius: f64, color: ChartColor) {
         self.scene.fill(
             Fill::NonZero,
             self.scale,
@@ -191,7 +191,7 @@ impl DrawBackend for VelloBackend {
         );
     }
 
-    fn draw_text(&mut self, text: &str, x: f64, y: f64, font_size: f64, color: Color4) {
+    fn draw_text(&mut self, text: &str, x: f64, y: f64, font_size: f64, color: ChartColor) {
         text_render::draw_text(
             &mut self.scene,
             &self.font,

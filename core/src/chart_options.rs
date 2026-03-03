@@ -1,6 +1,7 @@
 /// Chart configuration options — mirrors LWC's ChartOptions / TimeChartOptions.
 ///
-/// All colors are stored as `[r, g, b, a]` arrays (0.0..1.0).
+/// All colors use the `Color` newtype (RGBA f32, 0.0–1.0).
+use crate::draw_backend::Color;
 use serde::{Deserialize, Serialize};
 
 /// Price formatting configuration
@@ -62,14 +63,14 @@ impl Default for TimeFormat {
 #[serde(default)]
 pub struct GridOptions {
     pub visible: bool,
-    pub color: [f32; 4],
+    pub color: Color,
 }
 
 impl Default for GridOptions {
     fn default() -> Self {
         GridOptions {
             visible: true,
-            color: [0.15, 0.15, 0.2, 1.0],
+            color: Color::rgba(0.15, 0.15, 0.2, 1.0),
         }
     }
 }
@@ -79,7 +80,7 @@ impl Default for GridOptions {
 #[serde(default)]
 pub struct CrosshairOptions {
     pub visible: bool,
-    pub color: [f32; 4],
+    pub color: Color,
     pub line_width: f32,
 }
 
@@ -87,7 +88,7 @@ impl Default for CrosshairOptions {
     fn default() -> Self {
         CrosshairOptions {
             visible: true,
-            color: [0.5, 0.5, 0.6, 0.8],
+            color: Color::rgba(0.5, 0.5, 0.6, 0.8),
             line_width: 1.0,
         }
     }
@@ -103,7 +104,7 @@ pub struct PriceScaleOptions {
     /// Price format for labels
     pub format: PriceFormatOptions,
     /// Text color
-    pub text_color: [f32; 4],
+    pub text_color: Color,
     /// Price scale mode: "normal" or "logarithmic"
     pub mode: String,
 }
@@ -114,7 +115,7 @@ impl Default for PriceScaleOptions {
             visible: true,
             auto_scale: true,
             format: PriceFormatOptions::default(),
-            text_color: [0.6, 0.6, 0.7, 1.0],
+            text_color: Color::rgba(0.6, 0.6, 0.7, 1.0),
             mode: "normal".to_string(),
         }
     }
@@ -127,7 +128,7 @@ pub struct TimeScaleOptions {
     pub visible: bool,
     pub time_format: TimeFormat,
     /// Text color
-    pub text_color: [f32; 4],
+    pub text_color: Color,
     /// Minimum bar spacing (pixels)
     pub min_bar_spacing: f32,
     /// Maximum bar spacing (pixels)
@@ -145,7 +146,7 @@ impl Default for TimeScaleOptions {
         TimeScaleOptions {
             visible: true,
             time_format: TimeFormat::default(),
-            text_color: [0.6, 0.6, 0.7, 1.0],
+            text_color: Color::rgba(0.6, 0.6, 0.7, 1.0),
             min_bar_spacing: 1.0,
             max_bar_spacing: 30.0,
             right_offset: 0.0,
@@ -159,15 +160,15 @@ impl Default for TimeScaleOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SeriesColors {
-    pub bull_color: [f32; 4],
-    pub bear_color: [f32; 4],
+    pub bull_color: Color,
+    pub bear_color: Color,
 }
 
 impl Default for SeriesColors {
     fn default() -> Self {
         SeriesColors {
-            bull_color: [0.15, 0.65, 0.60, 1.0], // Teal/green
-            bear_color: [0.94, 0.33, 0.31, 1.0], // Red
+            bull_color: Color::rgba(0.15, 0.65, 0.60, 1.0), // Teal/green
+            bear_color: Color::rgba(0.94, 0.33, 0.31, 1.0), // Red
         }
     }
 }
@@ -176,16 +177,16 @@ impl Default for SeriesColors {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LayoutOptions {
-    pub background_color: [f32; 4],
-    pub text_color: [f32; 4],
+    pub background_color: Color,
+    pub text_color: Color,
     pub font_size: f32,
 }
 
 impl Default for LayoutOptions {
     fn default() -> Self {
         LayoutOptions {
-            background_color: [0.05, 0.05, 0.07, 1.0],
-            text_color: [0.6, 0.6, 0.7, 1.0],
+            background_color: Color::rgba(0.05, 0.05, 0.07, 1.0),
+            text_color: Color::rgba(0.6, 0.6, 0.7, 1.0),
             font_size: 11.0,
         }
     }

@@ -114,11 +114,11 @@ fn test_markers_json_roundtrip() {
 
     let markers = vec![
         SeriesMarker::new(1000, MarkerShape::ArrowUp, MarkerPosition::BelowBar)
-            .with_color([0.0, 1.0, 0.0, 1.0])
+            .with_color(lumen_charts::draw_backend::Color([0.0, 1.0, 0.0, 1.0]))
             .with_text("Buy")
             .with_size(12.0),
         SeriesMarker::new(2000, MarkerShape::ArrowDown, MarkerPosition::AboveBar)
-            .with_color([1.0, 0.0, 0.0, 1.0])
+            .with_color(lumen_charts::draw_backend::Color([1.0, 0.0, 0.0, 1.0]))
             .with_text("Sell")
             .with_size(10.0),
     ];

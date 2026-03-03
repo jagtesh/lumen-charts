@@ -1,4 +1,5 @@
 use crate::chart_model::OhlcBar;
+use crate::draw_backend::Color;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -47,12 +48,12 @@ pub struct LineDataPoint {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CandlestickOptions {
-    pub up_color: [f32; 4],
-    pub down_color: [f32; 4],
-    pub border_up_color: [f32; 4],
-    pub border_down_color: [f32; 4],
-    pub wick_up_color: [f32; 4],
-    pub wick_down_color: [f32; 4],
+    pub up_color: Color,
+    pub down_color: Color,
+    pub border_up_color: Color,
+    pub border_down_color: Color,
+    pub wick_up_color: Color,
+    pub wick_down_color: Color,
     /// Whether to draw hollow candles for bullish bars
     pub hollow: bool,
 }
@@ -60,12 +61,12 @@ pub struct CandlestickOptions {
 impl Default for CandlestickOptions {
     fn default() -> Self {
         CandlestickOptions {
-            up_color: [0.15, 0.65, 0.60, 1.0],
-            down_color: [0.94, 0.33, 0.31, 1.0],
-            border_up_color: [0.15, 0.65, 0.60, 1.0],
-            border_down_color: [0.94, 0.33, 0.31, 1.0],
-            wick_up_color: [0.15, 0.65, 0.60, 1.0],
-            wick_down_color: [0.94, 0.33, 0.31, 1.0],
+            up_color: Color::rgba(0.15, 0.65, 0.60, 1.0),
+            down_color: Color::rgba(0.94, 0.33, 0.31, 1.0),
+            border_up_color: Color::rgba(0.15, 0.65, 0.60, 1.0),
+            border_down_color: Color::rgba(0.94, 0.33, 0.31, 1.0),
+            wick_up_color: Color::rgba(0.15, 0.65, 0.60, 1.0),
+            wick_down_color: Color::rgba(0.94, 0.33, 0.31, 1.0),
             hollow: false,
         }
     }
@@ -75,7 +76,7 @@ impl Default for CandlestickOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LineSeriesOptions {
-    pub color: [f32; 4],
+    pub color: Color,
     pub line_width: f32,
     /// Whether to draw circles at each data point
     pub point_markers_visible: bool,
@@ -85,7 +86,7 @@ pub struct LineSeriesOptions {
 impl Default for LineSeriesOptions {
     fn default() -> Self {
         LineSeriesOptions {
-            color: [0.26, 0.52, 0.96, 1.0], // Blue
+            color: Color::rgba(0.26, 0.52, 0.96, 1.0), // Blue
             line_width: 2.0,
             point_markers_visible: false,
             point_markers_radius: 3.0,
@@ -98,21 +99,21 @@ impl Default for LineSeriesOptions {
 #[serde(default)]
 pub struct AreaSeriesOptions {
     /// Line color at the top
-    pub line_color: [f32; 4],
+    pub line_color: Color,
     pub line_width: f32,
     /// Gradient top color (at the line)
-    pub top_color: [f32; 4],
+    pub top_color: Color,
     /// Gradient bottom color (at the chart bottom)
-    pub bottom_color: [f32; 4],
+    pub bottom_color: Color,
 }
 
 impl Default for AreaSeriesOptions {
     fn default() -> Self {
         AreaSeriesOptions {
-            line_color: [0.26, 0.52, 0.96, 1.0],
+            line_color: Color::rgba(0.26, 0.52, 0.96, 1.0),
             line_width: 2.0,
-            top_color: [0.26, 0.52, 0.96, 0.4],
-            bottom_color: [0.26, 0.52, 0.96, 0.0],
+            top_color: Color::rgba(0.26, 0.52, 0.96, 0.4),
+            bottom_color: Color::rgba(0.26, 0.52, 0.96, 0.0),
         }
     }
 }
@@ -122,7 +123,7 @@ impl Default for AreaSeriesOptions {
 #[serde(default)]
 pub struct HistogramSeriesOptions {
     /// Default bar color
-    pub color: [f32; 4],
+    pub color: Color,
     /// Base value (usually 0.0) — bars extend from base to value
     pub base: f64,
 }
@@ -130,7 +131,7 @@ pub struct HistogramSeriesOptions {
 impl Default for HistogramSeriesOptions {
     fn default() -> Self {
         HistogramSeriesOptions {
-            color: [0.26, 0.52, 0.96, 0.7],
+            color: Color::rgba(0.26, 0.52, 0.96, 0.7),
             base: 0.0,
         }
     }
@@ -142,7 +143,7 @@ pub struct HistogramDataPoint {
     pub time: i64,
     pub value: f64,
     /// Per-bar color override (if None, uses series default)
-    pub color: Option<[f32; 4]>,
+    pub color: Option<Color>,
 }
 
 /// Options specific to baseline series (LWC: BaselineSeriesOptions)
@@ -152,11 +153,11 @@ pub struct BaselineSeriesOptions {
     /// The baseline value that splits top/bottom areas
     pub base_value: f64,
     /// Color and fill for the region above the baseline
-    pub top_line_color: [f32; 4],
-    pub top_fill_color: [f32; 4],
+    pub top_line_color: Color,
+    pub top_fill_color: Color,
     /// Color and fill for the region below the baseline
-    pub bottom_line_color: [f32; 4],
-    pub bottom_fill_color: [f32; 4],
+    pub bottom_line_color: Color,
+    pub bottom_fill_color: Color,
     pub line_width: f32,
 }
 
@@ -164,10 +165,10 @@ impl Default for BaselineSeriesOptions {
     fn default() -> Self {
         BaselineSeriesOptions {
             base_value: 0.0,
-            top_line_color: [0.15, 0.65, 0.60, 1.0],
-            top_fill_color: [0.15, 0.65, 0.60, 0.2],
-            bottom_line_color: [0.94, 0.33, 0.31, 1.0],
-            bottom_fill_color: [0.94, 0.33, 0.31, 0.2],
+            top_line_color: Color::rgba(0.15, 0.65, 0.60, 1.0),
+            top_fill_color: Color::rgba(0.15, 0.65, 0.60, 0.2),
+            bottom_line_color: Color::rgba(0.94, 0.33, 0.31, 1.0),
+            bottom_fill_color: Color::rgba(0.94, 0.33, 0.31, 0.2),
             line_width: 2.0,
         }
     }
@@ -348,7 +349,7 @@ impl SeriesData {
 #[serde(default)]
 pub struct PriceLineOptions {
     pub price: f64,
-    pub color: [f32; 4],
+    pub color: Color,
     pub line_width: f32,
     /// 0=Solid, 1=Dotted, 2=Dashed
     pub line_style: u8,
@@ -359,7 +360,7 @@ impl Default for PriceLineOptions {
     fn default() -> Self {
         PriceLineOptions {
             price: 0.0,
-            color: [0.8, 0.2, 0.2, 1.0],
+            color: Color::rgba(0.8, 0.2, 0.2, 1.0),
             line_width: 1.0,
             line_style: 0,
             title: String::new(),
@@ -784,7 +785,7 @@ mod tests {
     fn test_candlestick_options_default() {
         let opts = CandlestickOptions::default();
         assert!(!opts.hollow);
-        assert_eq!(opts.up_color, [0.15, 0.65, 0.60, 1.0]);
+        assert_eq!(opts.up_color, Color::rgba(0.15, 0.65, 0.60, 1.0));
     }
 
     #[test]
@@ -823,7 +824,7 @@ mod tests {
             HistogramDataPoint {
                 time: 2,
                 value: -50.0,
-                color: Some([1.0, 0.0, 0.0, 1.0]),
+                color: Some(Color::rgba(1.0, 0.0, 0.0, 1.0)),
             },
         ];
         let s = Series::histogram(0, pts);

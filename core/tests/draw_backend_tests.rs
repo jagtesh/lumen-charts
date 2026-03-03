@@ -7,7 +7,7 @@
 //! - DrawBackend trait method coverage on VelloBackend
 
 use lumen_charts::backend_vello::VelloBackend;
-use lumen_charts::draw_backend::{snap, snap_x, snap_y, Color4, DrawBackend};
+use lumen_charts::draw_backend::{snap, snap_x, snap_y, Color, DrawBackend};
 
 // =============================================================================
 // Pixel-snap helper tests
@@ -93,7 +93,7 @@ fn vello_begin_frame_resets_scene() {
 
     // Draw something
     backend.set_scale(1.0, 1.0);
-    backend.fill_rect(0.0, 0.0, 100.0, 100.0, [1.0, 0.0, 0.0, 1.0]);
+    backend.fill_rect(0.0, 0.0, 100.0, 100.0, Color::rgba(1.0, 0.0, 0.0, 1.0));
     assert!(
         !backend.scene.encoding().is_empty(),
         "scene should have content after draw"
@@ -111,7 +111,7 @@ fn vello_begin_frame_resets_scene() {
 fn vello_end_frame_is_noop() {
     let mut backend = VelloBackend::new();
     backend.begin_frame(800.0, 600.0);
-    backend.fill_rect(0.0, 0.0, 50.0, 50.0, [0.0, 1.0, 0.0, 1.0]);
+    backend.fill_rect(0.0, 0.0, 50.0, 50.0, Color::rgba(0.0, 1.0, 0.0, 1.0));
     let before = backend.scene.encoding().is_empty();
 
     backend.end_frame();
@@ -127,7 +127,7 @@ fn vello_set_scale_uniform() {
     backend.set_scale(2.0, 2.0);
 
     // Drawing after scale should not panic
-    backend.fill_rect(0.0, 0.0, 100.0, 100.0, [1.0, 1.0, 1.0, 1.0]);
+    backend.fill_rect(0.0, 0.0, 100.0, 100.0, Color::rgba(1.0, 1.0, 1.0, 1.0));
     assert!(!backend.scene.encoding().is_empty());
 }
 
@@ -137,8 +137,8 @@ fn vello_set_scale_non_uniform() {
     backend.set_scale(2.0, 3.0);
 
     // Drawing with non-uniform scale should not panic
-    backend.fill_rect(0.0, 0.0, 100.0, 100.0, [1.0, 1.0, 1.0, 1.0]);
-    backend.stroke_line(0.0, 0.0, 100.0, 100.0, [1.0, 0.0, 0.0, 1.0], 1.0);
+    backend.fill_rect(0.0, 0.0, 100.0, 100.0, Color::rgba(1.0, 1.0, 1.0, 1.0));
+    backend.stroke_line(0.0, 0.0, 100.0, 100.0, Color::rgba(1.0, 0.0, 0.0, 1.0), 1.0);
     assert!(!backend.scene.encoding().is_empty());
 }
 
@@ -146,10 +146,10 @@ fn vello_set_scale_non_uniform() {
 // DrawBackend method coverage on VelloBackend
 // =============================================================================
 
-const RED: Color4 = [1.0, 0.0, 0.0, 1.0];
-const GREEN: Color4 = [0.0, 1.0, 0.0, 1.0];
-const BLUE: Color4 = [0.0, 0.0, 1.0, 1.0];
-const WHITE: Color4 = [1.0, 1.0, 1.0, 1.0];
+const RED: Color = Color::rgba(1.0, 0.0, 0.0, 1.0);
+const GREEN: Color = Color::rgba(0.0, 1.0, 0.0, 1.0);
+const BLUE: Color = Color::rgba(0.0, 0.0, 1.0, 1.0);
+const WHITE: Color = Color::rgba(1.0, 1.0, 1.0, 1.0);
 
 #[test]
 fn vello_fill_rect_produces_content() {
@@ -170,7 +170,10 @@ fn vello_fill_rect_gradient_produces_content() {
         100.0,
         0.0,
         100.0,
-        &[([1.0, 0.0, 0.0, 1.0], 0.0), ([0.0, 0.0, 1.0, 1.0], 1.0)],
+        &[
+            (Color::rgba(1.0, 0.0, 0.0, 1.0), 0.0),
+            (Color::rgba(0.0, 0.0, 1.0, 1.0), 1.0),
+        ],
     );
     assert!(!b.scene.encoding().is_empty());
 }
@@ -218,7 +221,10 @@ fn vello_fill_path_gradient_produces_content() {
         &points,
         0.0,
         100.0,
-        &[([1.0, 0.0, 0.0, 0.5], 0.0), ([0.0, 0.0, 1.0, 0.5], 1.0)],
+        &[
+            (Color::rgba(1.0, 0.0, 0.0, 0.5), 0.0),
+            (Color::rgba(0.0, 0.0, 1.0, 0.5), 1.0),
+        ],
     );
     assert!(!b.scene.encoding().is_empty());
 }
@@ -276,7 +282,7 @@ fn vello_full_frame_lifecycle() {
     b.begin_frame(800.0, 600.0);
 
     // Draw various elements
-    b.fill_rect(0.0, 0.0, 800.0, 600.0, [0.07, 0.07, 0.1, 1.0]);
+    b.fill_rect(0.0, 0.0, 800.0, 600.0, Color::rgba(0.07, 0.07, 0.1, 1.0));
     b.stroke_line(100.0, 100.0, 700.0, 100.0, RED, 1.0);
     b.fill_circle(400.0, 300.0, 50.0, GREEN);
     b.draw_text("Test", 10.0, 20.0, 14.0, WHITE);

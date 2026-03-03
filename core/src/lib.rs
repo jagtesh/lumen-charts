@@ -861,12 +861,12 @@ pub extern "C" fn chart_series_update_histogram_bar(
     if let Some(series) = chart.state.series.get_mut(series_id) {
         let color = if has_color {
             let bytes = color_rgba.to_be_bytes();
-            Some([
+            Some(crate::draw_backend::Color([
                 bytes[0] as f32 / 255.0,
                 bytes[1] as f32 / 255.0,
                 bytes[2] as f32 / 255.0,
                 bytes[3] as f32 / 255.0,
-            ])
+            ]))
         } else {
             None
         };
@@ -1428,12 +1428,12 @@ pub extern "C" fn chart_series_set_histogram_data(
     for i in 0..count {
         let color = if let Some(c) = colors {
             let bytes = c[i].to_be_bytes();
-            Some([
+            Some(crate::draw_backend::Color([
                 bytes[0] as f32 / 255.0,
                 bytes[1] as f32 / 255.0,
                 bytes[2] as f32 / 255.0,
                 bytes[3] as f32 / 255.0,
-            ])
+            ]))
         } else {
             None
         };
@@ -1629,7 +1629,7 @@ pub extern "C" fn chart_add_histogram_series(
             let g = ((c >> 16) & 0xFF) as f32 / 255.0;
             let b = ((c >> 8) & 0xFF) as f32 / 255.0;
             let a = (c & 0xFF) as f32 / 255.0;
-            [r, g, b, a]
+            crate::draw_backend::Color([r, g, b, a])
         });
         points.push(crate::series::HistogramDataPoint {
             time: times[i],
@@ -2245,12 +2245,12 @@ pub extern "C" fn chart_series_set_markers(
 
         if let Some(color) = item.get("color").and_then(|v| v.as_array()) {
             if color.len() == 4 {
-                marker.color = [
+                marker.color = crate::draw_backend::Color([
                     color[0].as_f64().unwrap_or(0.0) as f32,
                     color[1].as_f64().unwrap_or(0.0) as f32,
                     color[2].as_f64().unwrap_or(0.0) as f32,
                     color[3].as_f64().unwrap_or(1.0) as f32,
-                ];
+                ]);
             }
         }
         if let Some(size) = item.get("size").and_then(|v| v.as_f64()) {

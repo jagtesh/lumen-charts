@@ -3,20 +3,22 @@
 /// All functions are generic over `impl DrawBackend`, enabling multiple
 /// rendering backends (Vello/WebGPU, Canvas 2D, WebGL/femtovg).
 use crate::chart_state::ChartState;
-use crate::draw_backend::{snap_x, snap_y, Color4, DrawBackend};
+use crate::draw_backend::{snap_x, snap_y, Color, DrawBackend, Palette};
 use crate::overlays::{LineStyle, MarkerPosition, MarkerShape};
 use crate::series::{SeriesData, SeriesType};
 use crate::tick_marks::{generate_price_ticks, generate_time_ticks, TickMark};
 
-// Colors as Color4 (RGBA f32)
-const BG_COLOR: Color4 = [0.07, 0.07, 0.10, 1.0];
-const GRID_COLOR: Color4 = [0.15, 0.15, 0.20, 1.0];
-const AXIS_COLOR: Color4 = [0.4, 0.4, 0.5, 1.0];
-const BULL_COLOR: Color4 = [0.15, 0.65, 0.60, 1.0];
-const BEAR_COLOR: Color4 = [0.94, 0.33, 0.31, 1.0];
-const TEXT_COLOR: Color4 = [0.6, 0.6, 0.7, 1.0];
-const CROSSHAIR_COLOR: Color4 = [0.5, 0.5, 0.6, 0.8];
 const LABEL_FONT_SIZE: f64 = 11.0;
+
+// Convenience constants resolved from the palette
+const BG_COLOR: Color = Palette::Background.color();
+const GRID_COLOR: Color = Palette::Grid.color();
+const AXIS_COLOR: Color = Palette::Axis.color();
+const BULL_COLOR: Color = Palette::Bull.color();
+const BEAR_COLOR: Color = Palette::Bear.color();
+const TEXT_COLOR: Color = Palette::Text.color();
+const CROSSHAIR_COLOR: Color = Palette::Crosshair.color();
+const WHITE: Color = Palette::White.color();
 
 /// Render the entire chart from ChartState into a DrawBackend.
 /// This is the legacy entry point — always renders everything.
@@ -292,14 +294,14 @@ fn draw_crosshair(b: &mut impl DrawBackend, state: &ChartState) {
         let label_h = 18.0;
         let label_y = y - label_h / 2.0;
 
-        b.fill_rect(label_x, label_y, label_w, label_h, [0.2, 0.2, 0.3, 0.9]);
-        b.draw_text(
-            &label,
-            label_x + 4.0,
-            label_y + 13.0,
-            10.0,
-            [1.0, 1.0, 1.0, 1.0],
+        b.fill_rect(
+            label_x,
+            label_y,
+            label_w,
+            label_h,
+            Palette::CrosshairLabelBg.color(),
         );
+        b.draw_text(&label, label_x + 4.0, label_y + 13.0, 10.0, WHITE);
     }
 
     // OHLC info tooltip at top
@@ -315,7 +317,13 @@ fn draw_crosshair(b: &mut impl DrawBackend, state: &ChartState) {
             let info_w = text_w + 16.0;
             let info_x = plot.x as f64 + 8.0;
             let info_y = plot.y as f64 + 4.0;
-            b.fill_rect(info_x, info_y, info_w, 20.0, [0.12, 0.12, 0.18, 0.9]);
+            b.fill_rect(
+                info_x,
+                info_y,
+                info_w,
+                20.0,
+                Palette::CrosshairInfoBg.color(),
+            );
             b.draw_text(&info, info_x + 8.0, info_y + 14.0, 10.0, TEXT_COLOR);
         }
     }
@@ -451,7 +459,7 @@ fn draw_price_lines(b: &mut impl DrawBackend, state: &ChartState) {
                 label_x + 4.0,
                 label_y + 12.0,
                 LABEL_FONT_SIZE,
-                [1.0, 1.0, 1.0, 1.0],
+                WHITE,
             );
         }
     }
@@ -580,7 +588,7 @@ fn draw_last_value_marker(b: &mut impl DrawBackend, state: &ChartState) {
             label_x + 6.0,
             label_y + LABEL_FONT_SIZE,
             LABEL_FONT_SIZE,
-            [1.0, 1.0, 1.0, 1.0],
+            WHITE,
         );
 
         // Dashed line across the chart
@@ -892,12 +900,12 @@ fn draw_baseline_series(
             &[
                 (opts.top_fill_color, 0.0),
                 (
-                    [
+                    Color([
                         opts.top_fill_color[0],
                         opts.top_fill_color[1],
                         opts.top_fill_color[2],
                         0.0,
-                    ],
+                    ]),
                     1.0,
                 ),
             ],
@@ -925,12 +933,12 @@ fn draw_baseline_series(
             &[
                 (opts.bottom_fill_color, 0.0),
                 (
-                    [
+                    Color([
                         opts.bottom_fill_color[0],
                         opts.bottom_fill_color[1],
                         opts.bottom_fill_color[2],
                         0.0,
-                    ],
+                    ]),
                     1.0,
                 ),
             ],

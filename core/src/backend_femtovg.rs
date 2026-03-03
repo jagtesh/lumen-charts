@@ -7,7 +7,7 @@
 /// Gated behind the `femtovg-backend` feature flag.
 use femtovg::{renderer::OpenGl, Canvas, Color as FvgColor, Paint, Path as FvgPath};
 
-use crate::draw_backend::{Color4, DrawBackend, GradientStop};
+use crate::draw_backend::{Color, DrawBackend, GradientStop};
 
 /// femtovg-based backend: renders via OpenGL / WebGL2.
 pub struct FemtovgBackend {
@@ -46,7 +46,7 @@ impl FemtovgBackend {
 
 // ── Helper functions ────────────────────────────────────────
 
-fn c4_to_fvg(c: Color4) -> FvgColor {
+fn c4_to_fvg(c: Color) -> FvgColor {
     FvgColor::rgbaf(c[0], c[1], c[2], c[3])
 }
 
@@ -87,7 +87,7 @@ impl DrawBackend for FemtovgBackend {
         self.scale_y = sy as f32;
     }
 
-    fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color4) {
+    fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color) {
         let mut path = FvgPath::new();
         path.rect(x as f32, y as f32, w as f32, h as f32);
         let paint = Paint::color(c4_to_fvg(color));
@@ -124,7 +124,7 @@ impl DrawBackend for FemtovgBackend {
         self.canvas.fill_path(&path, &paint);
     }
 
-    fn stroke_line(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, color: Color4, width: f64) {
+    fn stroke_line(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, color: Color, width: f64) {
         let mut path = FvgPath::new();
         path.move_to(x0 as f32, y0 as f32);
         path.line_to(x1 as f32, y1 as f32);
@@ -139,7 +139,7 @@ impl DrawBackend for FemtovgBackend {
         y0: f64,
         x1: f64,
         y1: f64,
-        color: Color4,
+        color: Color,
         width: f64,
         dash_len: f64,
         gap_len: f64,
@@ -169,7 +169,7 @@ impl DrawBackend for FemtovgBackend {
         }
     }
 
-    fn stroke_path(&mut self, points: &[(f64, f64)], color: Color4, width: f64) {
+    fn stroke_path(&mut self, points: &[(f64, f64)], color: Color, width: f64) {
         if points.len() < 2 {
             return;
         }
@@ -179,7 +179,7 @@ impl DrawBackend for FemtovgBackend {
         self.canvas.stroke_path(&path, &paint);
     }
 
-    fn fill_path(&mut self, points: &[(f64, f64)], color: Color4) {
+    fn fill_path(&mut self, points: &[(f64, f64)], color: Color) {
         if points.len() < 3 {
             return;
         }
@@ -213,14 +213,14 @@ impl DrawBackend for FemtovgBackend {
         self.canvas.fill_path(&path, &paint);
     }
 
-    fn fill_circle(&mut self, cx: f64, cy: f64, radius: f64, color: Color4) {
+    fn fill_circle(&mut self, cx: f64, cy: f64, radius: f64, color: Color) {
         let mut path = FvgPath::new();
         path.circle(cx as f32, cy as f32, radius as f32);
         let paint = Paint::color(c4_to_fvg(color));
         self.canvas.fill_path(&path, &paint);
     }
 
-    fn draw_text(&mut self, text: &str, x: f64, y: f64, font_size: f64, color: Color4) {
+    fn draw_text(&mut self, text: &str, x: f64, y: f64, font_size: f64, color: Color) {
         let mut paint = Paint::color(c4_to_fvg(color));
         paint.set_font_size(font_size as f32);
         // Note: font must be loaded into the canvas separately via canvas.add_font()

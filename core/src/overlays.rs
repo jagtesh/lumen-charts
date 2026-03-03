@@ -1,4 +1,5 @@
 use crate::chart_model::OhlcBar;
+use crate::draw_backend::Color;
 
 // ---------------------------------------------------------------------------
 // Price lines: horizontal lines drawn at a specific price level
@@ -23,7 +24,7 @@ impl Default for LineStyle {
 pub struct PriceLine {
     pub id: u32,
     pub price: f64,
-    pub color: [f32; 4],
+    pub color: Color,
     pub line_width: f32,
     pub line_style: LineStyle,
     pub label: String,
@@ -35,7 +36,7 @@ impl PriceLine {
         PriceLine {
             id,
             price,
-            color: [0.6, 0.6, 0.7, 0.8],
+            color: Color::rgba(0.6, 0.6, 0.7, 0.8),
             line_width: 1.0,
             line_style: LineStyle::Dashed,
             label: format!("{:.2}", price),
@@ -43,7 +44,7 @@ impl PriceLine {
         }
     }
 
-    pub fn with_color(mut self, color: [f32; 4]) -> Self {
+    pub fn with_color(mut self, color: Color) -> Self {
         self.color = color;
         self
     }
@@ -86,7 +87,7 @@ pub struct SeriesMarker {
     pub time: i64,
     pub shape: MarkerShape,
     pub position: MarkerPosition,
-    pub color: [f32; 4],
+    pub color: Color,
     pub size: f32,
     pub text: String,
 }
@@ -97,13 +98,13 @@ impl SeriesMarker {
             time,
             shape,
             position,
-            color: [0.15, 0.65, 0.60, 1.0],
+            color: Color::rgba(0.15, 0.65, 0.60, 1.0),
             size: 8.0,
             text: String::new(),
         }
     }
 
-    pub fn with_color(mut self, color: [f32; 4]) -> Self {
+    pub fn with_color(mut self, color: Color) -> Self {
         self.color = color;
         self
     }
@@ -136,14 +137,14 @@ impl SeriesMarker {
 #[derive(Debug, Clone)]
 pub struct LastValueMarker {
     pub visible: bool,
-    pub color: [f32; 4],
+    pub color: Color,
 }
 
 impl Default for LastValueMarker {
     fn default() -> Self {
         LastValueMarker {
             visible: true,
-            color: [0.15, 0.65, 0.60, 1.0],
+            color: Color::rgba(0.15, 0.65, 0.60, 1.0),
         }
     }
 }
@@ -173,7 +174,7 @@ pub enum VAlign {
 pub struct Watermark {
     pub text: String,
     pub font_size: f32,
-    pub color: [f32; 4],
+    pub color: Color,
     pub h_align: HAlign,
     pub v_align: VAlign,
     pub visible: bool,
@@ -184,7 +185,7 @@ impl Default for Watermark {
         Watermark {
             text: String::new(),
             font_size: 48.0,
-            color: [0.2, 0.2, 0.25, 0.3],
+            color: Color::rgba(0.2, 0.2, 0.25, 0.3),
             h_align: HAlign::Center,
             v_align: VAlign::Center,
             visible: false,
@@ -303,12 +304,12 @@ mod tests {
     #[test]
     fn test_price_line_builder() {
         let pl = PriceLine::new(1, 200.0)
-            .with_color([1.0, 0.0, 0.0, 1.0])
+            .with_color(Color::rgba(1.0, 0.0, 0.0, 1.0))
             .with_label("Support")
             .with_style(LineStyle::Solid);
         assert_eq!(pl.label, "Support");
         assert_eq!(pl.line_style, LineStyle::Solid);
-        assert_eq!(pl.color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(pl.color, Color::rgba(1.0, 0.0, 0.0, 1.0));
     }
 
     #[test]
@@ -365,7 +366,7 @@ mod tests {
     #[test]
     fn test_marker_builder() {
         let marker = SeriesMarker::new(500, MarkerShape::Circle, MarkerPosition::AboveBar)
-            .with_color([1.0, 0.0, 0.0, 1.0])
+            .with_color(Color::rgba(1.0, 0.0, 0.0, 1.0))
             .with_text("Buy")
             .with_size(12.0);
         assert_eq!(marker.text, "Buy");

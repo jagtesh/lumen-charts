@@ -8,7 +8,7 @@
 use wasm_bindgen::JsValue;
 use web_sys::CanvasRenderingContext2d;
 
-use crate::draw_backend::{Color4, DrawBackend, GradientStop};
+use crate::draw_backend::{Color, DrawBackend, GradientStop};
 
 /// Canvas 2D backend for WASM — renders to a browser <canvas> element.
 pub struct Canvas2DBackend {
@@ -39,8 +39,8 @@ impl Canvas2DBackend {
 
 // ── Helper functions ────────────────────────────────────────
 
-/// Convert Color4 to a CSS rgba string.
-fn color_to_css(c: Color4) -> String {
+/// Convert Color to a CSS rgba string.
+fn color_to_css(c: Color) -> String {
     format!(
         "rgba({},{},{},{})",
         (c[0] * 255.0).round() as u8,
@@ -50,8 +50,8 @@ fn color_to_css(c: Color4) -> String {
     )
 }
 
-/// Convert Color4 to JsValue for canvas style.
-fn color_to_js(c: Color4) -> JsValue {
+/// Convert Color to JsValue for canvas style.
+fn color_to_js(c: Color) -> JsValue {
     JsValue::from_str(&color_to_css(c))
 }
 
@@ -82,7 +82,7 @@ impl DrawBackend for Canvas2DBackend {
         self.scale_y = sy;
     }
 
-    fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color4) {
+    fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color) {
         self.ctx.set_fill_style(&color_to_js(color));
         self.ctx.fill_rect(x, y, w, h);
     }
@@ -108,7 +108,7 @@ impl DrawBackend for Canvas2DBackend {
         }
     }
 
-    fn stroke_line(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, color: Color4, width: f64) {
+    fn stroke_line(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, color: Color, width: f64) {
         self.ctx.set_stroke_style(&color_to_js(color));
         self.ctx.set_line_width(width);
         self.ctx.set_line_dash(&JsValue::from(js_sys::Array::new())).ok();
@@ -124,7 +124,7 @@ impl DrawBackend for Canvas2DBackend {
         y0: f64,
         x1: f64,
         y1: f64,
-        color: Color4,
+        color: Color,
         width: f64,
         dash_len: f64,
         gap_len: f64,
@@ -143,7 +143,7 @@ impl DrawBackend for Canvas2DBackend {
         self.ctx.set_line_dash(&JsValue::from(js_sys::Array::new())).ok();
     }
 
-    fn stroke_path(&mut self, points: &[(f64, f64)], color: Color4, width: f64) {
+    fn stroke_path(&mut self, points: &[(f64, f64)], color: Color, width: f64) {
         if points.len() < 2 {
             return;
         }
@@ -158,7 +158,7 @@ impl DrawBackend for Canvas2DBackend {
         self.ctx.stroke();
     }
 
-    fn fill_path(&mut self, points: &[(f64, f64)], color: Color4) {
+    fn fill_path(&mut self, points: &[(f64, f64)], color: Color) {
         if points.len() < 3 {
             return;
         }
@@ -201,7 +201,7 @@ impl DrawBackend for Canvas2DBackend {
         }
     }
 
-    fn fill_circle(&mut self, cx: f64, cy: f64, radius: f64, color: Color4) {
+    fn fill_circle(&mut self, cx: f64, cy: f64, radius: f64, color: Color) {
         self.ctx.set_fill_style(&color_to_js(color));
         self.ctx.begin_path();
         self.ctx
@@ -210,7 +210,7 @@ impl DrawBackend for Canvas2DBackend {
         self.ctx.fill();
     }
 
-    fn draw_text(&mut self, text: &str, x: f64, y: f64, font_size: f64, color: Color4) {
+    fn draw_text(&mut self, text: &str, x: f64, y: f64, font_size: f64, color: Color) {
         self.ctx
             .set_font(&format!("{}px sans-serif", font_size));
         self.ctx.set_fill_style(&color_to_js(color));
