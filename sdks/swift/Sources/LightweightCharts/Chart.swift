@@ -26,9 +26,18 @@ public class Chart {
 
     // MARK: - Lifecycle
 
-    /// Create a new chart bound to a Metal layer.
-    public init(width: UInt32, height: UInt32, scaleFactor: Double, metalLayer: UnsafeMutableRawPointer) {
-        self.ptr = chart_create(width, height, scaleFactor, metalLayer)
+    /// Create a new chart bound to a native view.
+    ///
+    /// - Parameters:
+    ///   - viewKind: The type of native view handle (e.g. `.CHART_VIEW_METAL` for macOS).
+    ///   - viewHandle: The renderable rectangle (CAMetalLayer*, child HWND, etc.)
+    ///   - displayHandle: Display connection for X11/Wayland (nil for Metal/Win32).
+    ///   - width: Logical width of the view in points.
+    ///   - height: Logical height of the view in points.
+    ///   - scaleFactor: HiDPI scale factor (e.g. 2.0 for Retina).
+    public init(viewKind: ChartViewKind, viewHandle: UnsafeMutableRawPointer, displayHandle: UnsafeMutableRawPointer? = nil,
+                width: UInt32, height: UInt32, scaleFactor: Double) {
+        self.ptr = chart_create(viewKind, viewHandle, displayHandle, width, height, scaleFactor)
     }
 
     deinit {

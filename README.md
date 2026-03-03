@@ -31,8 +31,9 @@ possible, making migration straightforward:
 │       ├── src/        wasm-bindgen zero-cost passthrough to C-ABI
 │       └── chart_api.js  Lightweight Charts–style JS API
 └── examples/
-    ├── swift-demo/     macOS demo app (SwiftUI + Metal)
-    └── web-demo/       Browser demo (HTML + WebGPU)
+    ├── swift-demo/       macOS demo app (SwiftUI + Metal)
+    ├── webgpu-demo/      Browser demo (HTML + WebGPU)
+    └── web-canvas-demo/  Browser demo (HTML + Canvas 2D)
 ```
 
 ## Installation
@@ -115,18 +116,26 @@ make swift-demo   # core-libs → sync header → run Swift demo
 
 > Override the library path with `LUMEN_LIB_PATH=/custom/path make swift-demo`
 
-### Run the WASM / WebGPU Demo
+### Run the WebGPU Demo
 
 ```bash
-make wasm-demo    # builds WASM SDK → starts local server at http://localhost:8080
+make webgpu-demo  # builds WASM SDK → starts local server at http://localhost:8080
 ```
 
 > Requires Chrome 113+ or Safari 18+ for WebGPU.
 
+### Run the Canvas 2D Demo
+
+```bash
+make web-canvas-demo  # starts server at http://localhost:8081 (no build needed)
+```
+
+> Works in any browser — no WebGPU required.
+
 ### Run Tests
 
 ```bash
-make test         # runs all 265 tests (unit + integration + parity + C-ABI callback)
+make test         # runs all 292 tests (unit + integration + parity + C-ABI + DrawBackend)
 ```
 
 ## Architecture

@@ -33,6 +33,29 @@ use crate::chart_state::ChartState;
 use vello::wgpu;
 use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
 
+use wgpu::rwh;
+
+/// Identifies the type of native view handle passed to `chart_create`.
+///
+/// The caller creates a view (a renderable rectangle within their window)
+/// and passes its handle via this enum. wgpu automatically selects the
+/// best GPU backend (Metal, DX12, Vulkan) — the caller never needs to
+/// think about GPU APIs.
+///
+/// | Kind    | view_handle        | display_handle          |
+/// |---------|--------------------|-------------------------|
+/// | Metal   | CAMetalLayer*      | NULL                    |
+/// | Win32   | child HWND         | NULL                    |
+/// | X11     | X11 Window (cast)  | Display*                |
+/// | Wayland | wl_surface*        | wl_display*             |
+#[repr(C)]
+pub enum ChartViewKind {
+    Metal = 0,
+    Win32 = 1,
+    X11 = 2,
+    Wayland = 3,
+}
+
 #[repr(C)]
 pub struct ChartEventParam {
     pub time: i64,
@@ -80,21 +103,131 @@ pub struct Chart {
     pub prev_chart_size: Option<(f32, f32)>,
 }
 
+impl Chart {
+    /// Create a Chart from a pre-created wgpu surface.
+    ///
+    /// This is the Rust-native entry point — Rust consumers (e.g. the winit
+    /// demo) create their own `wgpu::Surface` and pass it here. No C-ABI
+    /// or view-kind dispatch needed.
+    pub fn new_from_surface(
+        surface: wgpu::Surface<'static>,
+        width: u32,
+        height: u32,
+        scale_factor: f64,
+    ) -> Self {
+        Self::init_with_surface(surface, width, height, scale_factor)
+    }
+
+    /// Shared initialization: given a wgpu surface, set up the adapter, device,
+    /// Vello renderer, and return a ready-to-render Chart.
+    fn init_with_surface(
+        surface: wgpu::Surface<'static>,
+        width: u32,
+        height: u32,
+        scale_factor: f64,
+    ) -> Self {
+        let data = ChartData { bars: Vec::new() };
+        let state = ChartState::new(data, width as f32, height as f32, scale_factor);
+
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: Some(&surface),
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        }))
+        .expect("Failed to find a suitable GPU adapter");
+
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("chart-device"),
+                ..Default::default()
+            },
+            None,
+        ))
+        .expect("Failed to create GPU device");
+
+        let surface_caps = surface.get_capabilities(&adapter);
+        let format = surface_caps
+            .formats
+            .iter()
+            .find(|f| !f.is_srgb())
+            .copied()
+            .unwrap_or(surface_caps.formats[0]);
+
+        let physical_width = (width as f64 * scale_factor) as u32;
+        let physical_height = (height as f64 * scale_factor) as u32;
+
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: physical_width.max(1),
+            height: physical_height.max(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &surface_config);
+
+        let vello_renderer = VelloRenderer::new(
+            &device,
+            RendererOptions {
+                surface_format: Some(format),
+                use_cpu: false,
+                antialiasing_support: vello::AaSupport::area_only(),
+                num_init_threads: None,
+            },
+        )
+        .expect("Failed to create Vello renderer");
+
+        Chart {
+            state,
+            backend: backend_vello::VelloBackend::new(),
+            device,
+            queue,
+            surface,
+            surface_config,
+            vello_renderer,
+            cached_bottom_scene: None,
+            click_cb: None,
+            crosshair_move_cb: None,
+            dbl_click_cb: None,
+            visible_time_range_cb: None,
+            visible_logical_range_cb: None,
+            size_change_cb: None,
+            prev_visible_time_range: None,
+            prev_visible_logical_range: None,
+            prev_chart_size: None,
+        }
+    }
+}
+
 // ----- Lifecycle -----
 
+/// Create a chart attached to a native view.
+///
+/// `view_kind`       — identifies the type of native view handle.
+/// `view_handle`     — the renderable rectangle (CAMetalLayer*, child HWND, etc.)
+/// `display_handle`  — display connection for X11/Wayland (NULL for Metal/Win32).
+/// `width`, `height` — logical dimensions of the view in points.
+/// `scale_factor`    — HiDPI scale (e.g. 2.0 for Retina).
+///
+/// The chart fills the entire view. Use `chart_resize()` when the view changes size.
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(not(target_arch = "wasm32"), no_mangle)]
 pub extern "C" fn chart_create(
+    view_kind: ChartViewKind,
+    view_handle: *mut c_void,
+    display_handle: *mut c_void,
     width: u32,
     height: u32,
     scale_factor: f64,
-    metal_layer: *mut c_void,
 ) -> *mut Chart {
     env_logger::try_init().ok();
-
-    // Start with empty data — host should call chart_set_data() to provide bars
-    let data = ChartData { bars: Vec::new() };
-    let state = ChartState::new(data, width as f32, height as f32, scale_factor);
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
@@ -102,81 +235,53 @@ pub extern "C" fn chart_create(
     });
 
     let surface = unsafe {
+        let target = match view_kind {
+            ChartViewKind::Metal => wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(view_handle),
+            ChartViewKind::Win32 => {
+                let raw_window = rwh::RawWindowHandle::Win32(rwh::Win32WindowHandle::new(
+                    std::num::NonZeroIsize::new(view_handle as isize)
+                        .expect("view_handle (HWND) must not be null"),
+                ));
+                let raw_display = rwh::RawDisplayHandle::Windows(rwh::WindowsDisplayHandle::new());
+                wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle: raw_display,
+                    raw_window_handle: raw_window,
+                }
+            }
+            ChartViewKind::X11 => {
+                let raw_window =
+                    rwh::RawWindowHandle::Xlib(rwh::XlibWindowHandle::new(view_handle as u64));
+                let raw_display = rwh::RawDisplayHandle::Xlib(rwh::XlibDisplayHandle::new(
+                    std::ptr::NonNull::new(display_handle),
+                    0,
+                ));
+                wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle: raw_display,
+                    raw_window_handle: raw_window,
+                }
+            }
+            ChartViewKind::Wayland => {
+                let raw_window = rwh::RawWindowHandle::Wayland(rwh::WaylandWindowHandle::new(
+                    std::ptr::NonNull::new(view_handle)
+                        .expect("view_handle (wl_surface) must not be null"),
+                ));
+                let raw_display = rwh::RawDisplayHandle::Wayland(rwh::WaylandDisplayHandle::new(
+                    std::ptr::NonNull::new(display_handle)
+                        .expect("display_handle (wl_display) must not be null"),
+                ));
+                wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle: raw_display,
+                    raw_window_handle: raw_window,
+                }
+            }
+        };
+
         instance
-            .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(metal_layer))
-            .expect("Failed to create wgpu surface from CAMetalLayer")
+            .create_surface_unsafe(target)
+            .expect("Failed to create wgpu surface from native view handle")
     };
 
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        compatible_surface: Some(&surface),
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        ..Default::default()
-    }))
-    .expect("Failed to find a suitable GPU adapter");
-
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            label: Some("chart-device"),
-            ..Default::default()
-        },
-        None,
-    ))
-    .expect("Failed to create GPU device");
-
-    let surface_caps = surface.get_capabilities(&adapter);
-    let format = surface_caps
-        .formats
-        .iter()
-        .find(|f| !f.is_srgb())
-        .copied()
-        .unwrap_or(surface_caps.formats[0]);
-
-    let physical_width = (width as f64 * scale_factor) as u32;
-    let physical_height = (height as f64 * scale_factor) as u32;
-
-    let surface_config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format,
-        width: physical_width.max(1),
-        height: physical_height.max(1),
-        present_mode: wgpu::PresentMode::AutoVsync,
-        alpha_mode: surface_caps.alpha_modes[0],
-        view_formats: vec![],
-        desired_maximum_frame_latency: 2,
-    };
-    surface.configure(&device, &surface_config);
-
-    let vello_renderer = VelloRenderer::new(
-        &device,
-        RendererOptions {
-            surface_format: Some(format),
-            use_cpu: false,
-            antialiasing_support: vello::AaSupport::area_only(),
-            num_init_threads: None,
-        },
-    )
-    .expect("Failed to create Vello renderer");
-
-    let chart = Chart {
-        state,
-        backend: backend_vello::VelloBackend::new(),
-        device,
-        queue,
-        surface,
-        surface_config,
-        vello_renderer,
-        cached_bottom_scene: None,
-        click_cb: None,
-        crosshair_move_cb: None,
-        dbl_click_cb: None,
-        visible_time_range_cb: None,
-        visible_logical_range_cb: None,
-        size_change_cb: None,
-        prev_visible_time_range: None,
-        prev_visible_logical_range: None,
-        prev_chart_size: None,
-    };
-
+    let chart = Chart::init_with_surface(surface, width, height, scale_factor);
     Box::into_raw(Box::new(chart))
 }
 

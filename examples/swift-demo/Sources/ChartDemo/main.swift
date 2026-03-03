@@ -2,6 +2,7 @@ import AppKit
 import QuartzCore
 import Metal
 import LightweightCharts
+import CChartCore
 
 // ---------------------------------------------------------------------------
 // Sample data generation (ported from Rust sample_data.rs)
@@ -143,10 +144,11 @@ class ChartView: NSView {
 
         // Create chart via wrapper API
         let c = Chart(
+            viewKind: CHART_VIEW_METAL,
+            viewHandle: layerPtr,
             width: UInt32(size.width),
             height: UInt32(size.height),
-            scaleFactor: scaleFactor,
-            metalLayer: layerPtr
+            scaleFactor: scaleFactor
         )
 
         // Load sample data

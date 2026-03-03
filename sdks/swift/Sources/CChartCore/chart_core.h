@@ -7,8 +7,18 @@
 
 typedef struct Chart Chart;
 
+// Identifies the type of native view handle passed to chart_create.
+// The chart fills the entire view. wgpu auto-selects the GPU backend.
+typedef enum {
+    CHART_VIEW_METAL   = 0,  // view = CAMetalLayer*,      display = NULL
+    CHART_VIEW_WIN32   = 1,  // view = child HWND,          display = NULL
+    CHART_VIEW_X11     = 2,  // view = X11 child Window,    display = Display*
+    CHART_VIEW_WAYLAND = 3,  // view = wl_subsurface*,      display = wl_display*
+} ChartViewKind;
+
 // Lifecycle
-Chart* chart_create(uint32_t width, uint32_t height, double scale_factor, void* metal_layer);
+Chart* chart_create(ChartViewKind view_kind, void* view_handle, void* display_handle,
+                    uint32_t width, uint32_t height, double scale_factor);
 void chart_render(Chart* chart);
 void chart_resize(Chart* chart, uint32_t width, uint32_t height, double scale_factor);
 void chart_destroy(Chart* chart);
