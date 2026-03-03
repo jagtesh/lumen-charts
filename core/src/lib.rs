@@ -104,23 +104,25 @@ pub struct Chart {
 }
 
 impl Chart {
-    /// Create a Chart from a pre-created wgpu surface.
+    /// Create a Chart from a pre-created wgpu instance and surface.
     ///
     /// This is the Rust-native entry point — Rust consumers (e.g. the winit
-    /// demo) create their own `wgpu::Surface` and pass it here. No C-ABI
-    /// or view-kind dispatch needed.
+    /// demo) create their own `wgpu::Instance` and `wgpu::Surface`, then
+    /// pass both here. The library never creates wgpu resources on its own.
     pub fn new_from_surface(
+        instance: wgpu::Instance,
         surface: wgpu::Surface<'static>,
         width: u32,
         height: u32,
         scale_factor: f64,
     ) -> Self {
-        Self::init_with_surface(surface, width, height, scale_factor)
+        Self::init_with_surface(instance, surface, width, height, scale_factor)
     }
 
-    /// Shared initialization: given a wgpu surface, set up the adapter, device,
-    /// Vello renderer, and return a ready-to-render Chart.
+    /// Shared initialization: given a wgpu instance and surface, set up the
+    /// adapter, device, Vello renderer, and return a ready-to-render Chart.
     fn init_with_surface(
+        instance: wgpu::Instance,
         surface: wgpu::Surface<'static>,
         width: u32,
         height: u32,
@@ -128,11 +130,6 @@ impl Chart {
     ) -> Self {
         let data = ChartData { bars: Vec::new() };
         let state = ChartState::new(data, width as f32, height as f32, scale_factor);
-
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..Default::default()
-        });
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             compatible_surface: Some(&surface),
@@ -281,7 +278,7 @@ pub extern "C" fn chart_create(
             .expect("Failed to create wgpu surface from native view handle")
     };
 
-    let chart = Chart::init_with_surface(surface, width, height, scale_factor);
+    let chart = Chart::init_with_surface(instance, surface, width, height, scale_factor);
     Box::into_raw(Box::new(chart))
 }
 

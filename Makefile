@@ -5,6 +5,7 @@
 #   make core-libs       Build the Rust core library (release)
 #   make swift-sdk       Build the Swift SDK (core + header sync)
 #   make swift-demo      Build core + run the Swift demo app
+#   make rust-demo       Build + run the Rust demo app
 #   make wasm-sdk        Build the WASM SDK via wasm-pack
 #   make webgpu-demo     Build WASM SDK + start WebGPU demo server
 #   make web-canvas-demo Start the Canvas 2D demo server
@@ -16,6 +17,7 @@ SWIFT_SDK      := sdks/swift
 SWIFT_DEMO     := examples/swift-demo
 WASM_SDK       := sdks/wasm
 WEBGPU_DEMO    := examples/webgpu-demo
+RUST_DEMO      := examples/rust-demo
 CANVAS_DEMO    := examples/web-canvas-demo
 LIB_PATH       := $(CORE_DIR)/target/release
 HEADER_SRC     := $(CORE_DIR)/include/chart_core.h
@@ -64,6 +66,12 @@ webgpu-demo: wasm-sdk
 .PHONY: web-canvas-demo
 web-canvas-demo:
 	cd $(CANVAS_DEMO) && ./run.sh
+
+# ── Rust Demo ────────────────────────────────────────────────
+
+.PHONY: rust-demo
+rust-demo:
+	cd $(RUST_DEMO) && cargo run --release
 
 # ── Test & Clean ─────────────────────────────────────────────
 

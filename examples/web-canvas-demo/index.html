@@ -167,18 +167,32 @@
         // ── Chart state ──────────────────────────────────────────
         const data = generateSampleData();
         let chartType = 'candle';
-        let scrollOffset = 0;
+        // scrollIndex: fractional bar index of the rightmost visible bar.
+        // Starts at data.length (showing latest bars at right edge).
+        let scrollIndex = data.length;
         let barSpacing = 8;
         let crosshair = { x: -1, y: -1, visible: false };
+        let drag = { active: false, startX: 0, startIndex: 0 };
 
         const margins = { top: 10, right: 60, bottom: 30, left: 5 };
 
-        // ── Price scale ──────────────────────────────────────────
+        // ── Viewport ─────────────────────────────────────────────
+        function visibleBars(plotW) {
+            return Math.ceil(plotW / barSpacing);
+        }
+
         function visibleRange(plotW) {
-            const count = Math.ceil(plotW / barSpacing);
-            const first = Math.max(0, data.length - count - Math.floor(scrollOffset / barSpacing));
-            const last = Math.min(data.length, first + count + 2);
+            const count = visibleBars(plotW);
+            const last = Math.min(data.length, Math.round(scrollIndex));
+            const first = Math.max(0, last - count);
             return [first, last];
+        }
+
+        function clampScroll(plotW) {
+            const count = visibleBars(plotW);
+            // Minimum: show at least `count` bars from the start, or all data
+            const minIndex = Math.min(data.length, count);
+            scrollIndex = Math.max(minIndex, Math.min(data.length, scrollIndex));
         }
 
         function priceRange(first, last) {
@@ -231,6 +245,9 @@
             const plotY = margins.top;
             const plotW = cssW - margins.left - margins.right;
             const plotH = cssH - margins.top - margins.bottom;
+
+            // Clamp scroll before computing visible range
+            clampScroll(plotW);
 
             // Background
             ctx.fillStyle = BG;
@@ -351,7 +368,7 @@
             ctx.textAlign = 'start';
 
             // ── Crosshair ────────────────────────────────────
-            if (crosshair.visible) {
+            if (crosshair.visible && !drag.active) {
                 const cx = snap(crosshair.x, dpr);
                 const cy = snap(crosshair.y, dpr);
                 ctx.setLineDash([4, 4]);
@@ -394,21 +411,51 @@
 
         canvas.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
-            crosshair.x = e.clientX - rect.left;
-            crosshair.y = e.clientY - rect.top;
-            crosshair.visible = true;
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            if (drag.active) {
+                // Drag-to-pan: convert px delta to bar index delta
+                const dx = mx - drag.startX;
+                scrollIndex = drag.startIndex - dx / barSpacing;
+            } else {
+                crosshair.x = mx;
+                crosshair.y = my;
+                crosshair.visible = true;
+            }
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            drag.active = true;
+            drag.startX = e.clientX - rect.left;
+            drag.startIndex = scrollIndex;
+            canvas.style.cursor = 'grabbing';
+            crosshair.visible = false;
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            drag.active = false;
+            canvas.style.cursor = 'crosshair';
         });
 
         canvas.addEventListener('mouseleave', () => {
+            drag.active = false;
             crosshair.visible = false;
+            canvas.style.cursor = 'crosshair';
         });
 
         canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             if (e.ctrlKey || e.metaKey) {
-                barSpacing = Math.max(2, Math.min(20, barSpacing - e.deltaY * 0.02));
+                // Zoom: Ctrl+scroll or pinch
+                barSpacing = Math.max(2, Math.min(40, barSpacing - e.deltaY * 0.02));
             } else {
-                scrollOffset += e.deltaX - e.deltaY;
+                // Pan: scroll wheel or trackpad swipe
+                // deltaY > 0 (scroll down / swipe up) = pan right (later data)
+                // deltaX > 0 (swipe left) = pan right (later data)
+                const deltaBars = (e.deltaY + e.deltaX) / barSpacing;
+                scrollIndex += deltaBars;
             }
         }, { passive: false });
 
@@ -419,7 +466,7 @@
         });
 
         document.getElementById('btn-fit').addEventListener('click', () => {
-            scrollOffset = 0;
+            scrollIndex = data.length;
             barSpacing = 8;
         });
 

@@ -31,7 +31,8 @@ possible, making migration straightforward:
 │       ├── src/        wasm-bindgen zero-cost passthrough to C-ABI
 │       └── chart_api.js  Lightweight Charts–style JS API
 └── examples/
-    ├── swift-demo/       macOS demo app (SwiftUI + Metal)
+    ├── swift-demo/       macOS demo app (AppKit + Metal)
+    ├── rust-demo/        Cross-platform demo (winit + wgpu + egui)
     ├── webgpu-demo/      Browser demo (HTML + WebGPU)
     └── web-canvas-demo/  Browser demo (HTML + Canvas 2D)
 ```
@@ -115,6 +116,14 @@ make swift-demo   # core-libs → sync header → run Swift demo
 ```
 
 > Override the library path with `LUMEN_LIB_PATH=/custom/path make swift-demo`
+
+### Run the Rust Demo
+
+```bash
+make rust-demo    # builds core + runs cross-platform winit/egui demo
+```
+
+> Features: chart type switching, overlay, MACD indicator, egui toolbar. Works on macOS, Windows, and Linux.
 
 ### Run the WebGPU Demo
 

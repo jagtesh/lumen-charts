@@ -8,6 +8,7 @@
 //!   F    Fit content
 //!   O    Toggle overlay
 //!   M    Toggle MACD
+#![allow(unused_unsafe)]
 
 use lumen_charts::chart_model::OhlcBar;
 use lumen_charts::sample_data::sample_data;
@@ -261,6 +262,7 @@ impl AppState {
     }
 
     fn render_egui_and_chart(&mut self) {
+        // --- egui input + UI layout ---
         let raw_input = self.egui_state.take_egui_input(&self.window);
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
@@ -272,7 +274,6 @@ impl AppState {
                             .clicked()
                         {
                             self.current_series_type = i;
-                            // Deferred — can't mutate chart inside egui closure
                         }
                     }
                     ui.separator();
@@ -292,90 +293,120 @@ impl AppState {
             });
         });
 
-        // Process egui actions
-        // Check which buttons were clicked by inspecting the response
-        // We need to re-run actions outside the closure
         self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);
 
-        // Render egui
+        // --- Single surface acquire ---
         let surface_texture = match self.chart.surface.get_current_texture() {
             Ok(t) => t,
             Err(_) => return,
         };
-        let surface_view = surface_texture
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let screen_descriptor = egui_wgpu::ScreenDescriptor {
-            size_in_pixels: [
-                self.chart.surface_config.width,
-                self.chart.surface_config.height,
-            ],
-            pixels_per_point: self.scale_factor as f32,
-        };
+        // --- Render chart via Vello (bypasses chart_render to avoid double-acquire) ---
+        {
+            use lumen_charts::backend_vello::VelloBackend;
+            use lumen_charts::chart_renderer::{render_bottom_scene, render_crosshair_scene};
 
-        // First render the chart
-        unsafe {
-            let ptr = &mut self.chart as *mut Chart;
-            lumen_charts::chart_render(ptr);
+            self.chart.backend.reset();
+
+            let mut bottom_backend = VelloBackend::new();
+            render_bottom_scene(&mut bottom_backend, &self.chart.state);
+            let bottom_scene = bottom_backend.scene;
+            self.chart.backend.scene_mut().append(&bottom_scene, None);
+            self.chart.cached_bottom_scene = Some(bottom_scene);
+
+            render_crosshair_scene(&mut self.chart.backend, &self.chart.state);
+
+            let render_params = vello::RenderParams {
+                base_color: vello::peniko::Color::BLACK,
+                width: self.chart.surface_config.width,
+                height: self.chart.surface_config.height,
+                antialiasing_method: vello::AaConfig::Area,
+            };
+
+            self.chart
+                .vello_renderer
+                .render_to_surface(
+                    &self.chart.device,
+                    &self.chart.queue,
+                    self.chart.backend.scene(),
+                    &surface_texture,
+                    &render_params,
+                )
+                .expect("Vello render failed");
         }
 
-        // Then overlay egui
-        let clipped_primitives = self
-            .egui_ctx
-            .tessellate(full_output.shapes, full_output.pixels_per_point);
+        // --- Overlay egui on top ---
+        {
+            let surface_view = surface_texture
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
 
-        for (id, image_delta) in &full_output.textures_delta.set {
-            self.egui_renderer.update_texture(
+            let screen_descriptor = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [
+                    self.chart.surface_config.width,
+                    self.chart.surface_config.height,
+                ],
+                pixels_per_point: self.scale_factor as f32,
+            };
+
+            let clipped_primitives = self
+                .egui_ctx
+                .tessellate(full_output.shapes, full_output.pixels_per_point);
+
+            for (id, image_delta) in &full_output.textures_delta.set {
+                self.egui_renderer.update_texture(
+                    &self.chart.device,
+                    &self.chart.queue,
+                    *id,
+                    image_delta,
+                );
+            }
+
+            let mut encoder =
+                self.chart
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("egui-encoder"),
+                    });
+
+            self.egui_renderer.update_buffers(
                 &self.chart.device,
                 &self.chart.queue,
-                *id,
-                image_delta,
-            );
-        }
-
-        let mut encoder =
-            self.chart
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("egui-encoder"),
-                });
-
-        self.egui_renderer.update_buffers(
-            &self.chart.device,
-            &self.chart.queue,
-            &mut encoder,
-            &clipped_primitives,
-            &screen_descriptor,
-        );
-
-        {
-            let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("egui-render-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &surface_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load, // Preserve chart underneath
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            self.egui_renderer.render(
-                &mut render_pass.forget_lifetime(),
+                &mut encoder,
                 &clipped_primitives,
                 &screen_descriptor,
             );
+
+            {
+                let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("egui-render-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &surface_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                self.egui_renderer.render(
+                    &mut render_pass.forget_lifetime(),
+                    &clipped_primitives,
+                    &screen_descriptor,
+                );
+            }
+
+            self.chart.queue.submit(std::iter::once(encoder.finish()));
+
+            for id in &full_output.textures_delta.free {
+                self.egui_renderer.free_texture(id);
+            }
         }
 
-        self.chart.queue.submit(std::iter::once(encoder.finish()));
+        // --- Single present ---
         surface_texture.present();
-
-        for id in &full_output.textures_delta.free {
-            self.egui_renderer.free_texture(id);
-        }
     }
 }
 
@@ -403,16 +434,17 @@ impl ApplicationHandler for App {
         let size = window.inner_size();
 
         // Create wgpu surface from the window
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
         let surface = instance.create_surface(window.clone()).unwrap();
 
-        // Create chart from the surface
+        // Create chart from the instance + surface
         let logical_w = (size.width as f64 / scale_factor) as u32;
         let logical_h = (size.height as f64 / scale_factor) as u32;
-        let mut chart = Chart::new_from_surface(surface, logical_w, logical_h, scale_factor);
+        let mut chart =
+            Chart::new_from_surface(instance, surface, logical_w, logical_h, scale_factor);
 
         // Load sample data
         let bars = sample_data();
@@ -435,8 +467,10 @@ impl ApplicationHandler for App {
 
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
+            egui::ViewportId::ROOT,
             event_loop,
             Some(scale_factor as f32),
+            None,
             None,
         );
 
