@@ -1,5 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 pub mod backend_canvas2d;
+#[cfg(feature = "femtovg-backend")]
+pub mod backend_femtovg;
 pub mod backend_vello;
 pub mod chart_model;
 pub mod chart_options;
