@@ -806,6 +806,8 @@ dependencies = [
  "skrifa 0.26.6",
  "vello",
  "vello_encoding",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
