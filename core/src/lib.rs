@@ -1,8 +1,10 @@
+pub mod backend_vello;
 pub mod chart_model;
 pub mod chart_options;
 pub mod chart_renderer;
 pub mod chart_state;
 pub mod data_layer;
+pub mod draw_backend;
 pub mod formatters;
 pub mod invalidation;
 pub mod overlays;
