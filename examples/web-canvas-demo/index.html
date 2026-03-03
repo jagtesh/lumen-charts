@@ -117,8 +117,9 @@
         <button class="btn" id="btn-fit">Fit Content</button>
     </div>
     <div id="help">
-        No WebGPU required — runs on any browser with Canvas 2D support.
-        Scroll: pan &nbsp;|&nbsp; Mouse: crosshair
+        No WebGPU required — runs on any browser with Canvas 2D support.<br>
+        Scroll: pan &nbsp;|&nbsp; Ctrl+Scroll: zoom &nbsp;|&nbsp; Drag: pan &nbsp;|&nbsp;
+        Double-click: fit all
     </div>
 
     <script>
@@ -260,11 +261,21 @@
             ctx.strokeStyle = GRID;
             ctx.lineWidth = 1;
             const gridSteps = 6;
+            // Horizontal grid lines
             for (let i = 0; i <= gridSteps; i++) {
                 const y = snap(plotY + plotH * (i / gridSteps), dpr);
                 ctx.beginPath();
                 ctx.moveTo(plotX, y);
                 ctx.lineTo(plotX + plotW, y);
+                ctx.stroke();
+            }
+            // Vertical grid lines (aligned with X-axis label positions)
+            const vStep = Math.max(1, Math.floor((last - first) / 8));
+            for (let i = first; i < last; i += vStep) {
+                const x = snap(indexToX(i, first, plotX), dpr);
+                ctx.beginPath();
+                ctx.moveTo(x, plotY);
+                ctx.lineTo(x, plotY + plotH);
                 ctx.stroke();
             }
 
@@ -426,12 +437,18 @@
         });
 
         canvas.addEventListener('mousedown', (e) => {
+            e.preventDefault(); // prevent text selection during drag
             const rect = canvas.getBoundingClientRect();
             drag.active = true;
             drag.startX = e.clientX - rect.left;
             drag.startIndex = scrollIndex;
             canvas.style.cursor = 'grabbing';
             crosshair.visible = false;
+        });
+
+        canvas.addEventListener('dblclick', () => {
+            scrollIndex = data.length;
+            barSpacing = 8;
         });
 
         canvas.addEventListener('mouseup', () => {
