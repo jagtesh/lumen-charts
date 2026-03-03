@@ -1,5 +1,5 @@
 use crate::chart_model::OhlcBar;
-use crate::draw_backend::Color;
+use crate::draw_backend::{Color, ColorName};
 
 // ---------------------------------------------------------------------------
 // Price lines: horizontal lines drawn at a specific price level
@@ -36,7 +36,7 @@ impl PriceLine {
         PriceLine {
             id,
             price,
-            color: Color::rgba(0.6, 0.6, 0.7, 0.8),
+            color: ColorName::SlateGray.color().with_alpha(0.8),
             line_width: 1.0,
             line_style: LineStyle::Dashed,
             label: format!("{:.2}", price),
@@ -98,7 +98,7 @@ impl SeriesMarker {
             time,
             shape,
             position,
-            color: Color::rgba(0.15, 0.65, 0.60, 1.0),
+            color: ColorName::Teal.color(),
             size: 8.0,
             text: String::new(),
         }
@@ -144,7 +144,7 @@ impl Default for LastValueMarker {
     fn default() -> Self {
         LastValueMarker {
             visible: true,
-            color: Color::rgba(0.15, 0.65, 0.60, 1.0),
+            color: ColorName::Teal.color(),
         }
     }
 }
@@ -185,7 +185,7 @@ impl Default for Watermark {
         Watermark {
             text: String::new(),
             font_size: 48.0,
-            color: Color::rgba(0.2, 0.2, 0.25, 0.3),
+            color: ColorName::DarkOlive.color().with_alpha(0.3),
             h_align: HAlign::Center,
             v_align: VAlign::Center,
             visible: false,

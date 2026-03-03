@@ -7,6 +7,7 @@ pub mod chart_model;
 pub mod chart_options;
 pub mod chart_renderer;
 pub mod chart_state;
+pub mod color;
 pub mod data_layer;
 pub mod draw_backend;
 pub mod formatters;

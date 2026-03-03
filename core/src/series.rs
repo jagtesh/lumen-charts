@@ -1,5 +1,5 @@
 use crate::chart_model::OhlcBar;
-use crate::draw_backend::Color;
+use crate::draw_backend::{Color, ColorName};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -61,12 +61,12 @@ pub struct CandlestickOptions {
 impl Default for CandlestickOptions {
     fn default() -> Self {
         CandlestickOptions {
-            up_color: Color::rgba(0.15, 0.65, 0.60, 1.0),
-            down_color: Color::rgba(0.94, 0.33, 0.31, 1.0),
-            border_up_color: Color::rgba(0.15, 0.65, 0.60, 1.0),
-            border_down_color: Color::rgba(0.94, 0.33, 0.31, 1.0),
-            wick_up_color: Color::rgba(0.15, 0.65, 0.60, 1.0),
-            wick_down_color: Color::rgba(0.94, 0.33, 0.31, 1.0),
+            up_color: ColorName::Teal.color(),
+            down_color: ColorName::Red.color(),
+            border_up_color: ColorName::Teal.color(),
+            border_down_color: ColorName::Red.color(),
+            wick_up_color: ColorName::Teal.color(),
+            wick_down_color: ColorName::Red.color(),
             hollow: false,
         }
     }
@@ -86,7 +86,7 @@ pub struct LineSeriesOptions {
 impl Default for LineSeriesOptions {
     fn default() -> Self {
         LineSeriesOptions {
-            color: Color::rgba(0.26, 0.52, 0.96, 1.0), // Blue
+            color: ColorName::Blue.color(),
             line_width: 2.0,
             point_markers_visible: false,
             point_markers_radius: 3.0,
@@ -110,10 +110,10 @@ pub struct AreaSeriesOptions {
 impl Default for AreaSeriesOptions {
     fn default() -> Self {
         AreaSeriesOptions {
-            line_color: Color::rgba(0.26, 0.52, 0.96, 1.0),
+            line_color: ColorName::Blue.color(),
             line_width: 2.0,
-            top_color: Color::rgba(0.26, 0.52, 0.96, 0.4),
-            bottom_color: Color::rgba(0.26, 0.52, 0.96, 0.0),
+            top_color: ColorName::Blue.color().with_alpha(0.4),
+            bottom_color: ColorName::Blue.color().with_alpha(0.0),
         }
     }
 }
@@ -131,7 +131,7 @@ pub struct HistogramSeriesOptions {
 impl Default for HistogramSeriesOptions {
     fn default() -> Self {
         HistogramSeriesOptions {
-            color: Color::rgba(0.26, 0.52, 0.96, 0.7),
+            color: ColorName::Blue.color().with_alpha(0.7),
             base: 0.0,
         }
     }
@@ -165,10 +165,10 @@ impl Default for BaselineSeriesOptions {
     fn default() -> Self {
         BaselineSeriesOptions {
             base_value: 0.0,
-            top_line_color: Color::rgba(0.15, 0.65, 0.60, 1.0),
-            top_fill_color: Color::rgba(0.15, 0.65, 0.60, 0.2),
-            bottom_line_color: Color::rgba(0.94, 0.33, 0.31, 1.0),
-            bottom_fill_color: Color::rgba(0.94, 0.33, 0.31, 0.2),
+            top_line_color: ColorName::Teal.color(),
+            top_fill_color: ColorName::Teal.color().with_alpha(0.2),
+            bottom_line_color: ColorName::Red.color(),
+            bottom_fill_color: ColorName::Red.color().with_alpha(0.2),
             line_width: 2.0,
         }
     }
@@ -360,7 +360,7 @@ impl Default for PriceLineOptions {
     fn default() -> Self {
         PriceLineOptions {
             price: 0.0,
-            color: Color::rgba(0.8, 0.2, 0.2, 1.0),
+            color: ColorName::Crimson.color(),
             line_width: 1.0,
             line_style: 0,
             title: String::new(),
@@ -785,7 +785,7 @@ mod tests {
     fn test_candlestick_options_default() {
         let opts = CandlestickOptions::default();
         assert!(!opts.hollow);
-        assert_eq!(opts.up_color, Color::rgba(0.15, 0.65, 0.60, 1.0));
+        assert_eq!(opts.up_color, ColorName::Teal.color());
     }
 
     #[test]

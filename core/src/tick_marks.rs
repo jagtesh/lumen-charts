@@ -171,7 +171,7 @@ mod tests {
         };
 
         // Create two time scales at different scroll positions
-        let mut ts1 = TimeScale::new(200, 800.0);
+        let ts1 = TimeScale::new(200, 800.0);
         let mut ts2 = TimeScale::new(200, 800.0);
         ts2.scroll_by(-5.0); // Pan slightly
 

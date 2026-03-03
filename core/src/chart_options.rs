@@ -1,7 +1,7 @@
 /// Chart configuration options — mirrors LWC's ChartOptions / TimeChartOptions.
 ///
 /// All colors use the `Color` newtype (RGBA f32, 0.0–1.0).
-use crate::draw_backend::Color;
+use crate::draw_backend::{Color, ColorName};
 use serde::{Deserialize, Serialize};
 
 /// Price formatting configuration
@@ -70,7 +70,7 @@ impl Default for GridOptions {
     fn default() -> Self {
         GridOptions {
             visible: true,
-            color: Color::rgba(0.15, 0.15, 0.2, 1.0),
+            color: ColorName::DarkSlate.color(),
         }
     }
 }
@@ -88,7 +88,7 @@ impl Default for CrosshairOptions {
     fn default() -> Self {
         CrosshairOptions {
             visible: true,
-            color: Color::rgba(0.5, 0.5, 0.6, 0.8),
+            color: ColorName::LightGray.color().with_alpha(0.8),
             line_width: 1.0,
         }
     }
@@ -115,7 +115,7 @@ impl Default for PriceScaleOptions {
             visible: true,
             auto_scale: true,
             format: PriceFormatOptions::default(),
-            text_color: Color::rgba(0.6, 0.6, 0.7, 1.0),
+            text_color: ColorName::SlateGray.color(),
             mode: "normal".to_string(),
         }
     }
@@ -146,7 +146,7 @@ impl Default for TimeScaleOptions {
         TimeScaleOptions {
             visible: true,
             time_format: TimeFormat::default(),
-            text_color: Color::rgba(0.6, 0.6, 0.7, 1.0),
+            text_color: ColorName::SlateGray.color(),
             min_bar_spacing: 1.0,
             max_bar_spacing: 30.0,
             right_offset: 0.0,
@@ -167,8 +167,8 @@ pub struct SeriesColors {
 impl Default for SeriesColors {
     fn default() -> Self {
         SeriesColors {
-            bull_color: Color::rgba(0.15, 0.65, 0.60, 1.0), // Teal/green
-            bear_color: Color::rgba(0.94, 0.33, 0.31, 1.0), // Red
+            bull_color: ColorName::Teal.color(),
+            bear_color: ColorName::Red.color(),
         }
     }
 }
@@ -185,8 +185,8 @@ pub struct LayoutOptions {
 impl Default for LayoutOptions {
     fn default() -> Self {
         LayoutOptions {
-            background_color: Color::rgba(0.05, 0.05, 0.07, 1.0),
-            text_color: Color::rgba(0.6, 0.6, 0.7, 1.0),
+            background_color: ColorName::DarkerCharcoal.color(),
+            text_color: ColorName::SlateGray.color(),
             font_size: 11.0,
         }
     }
