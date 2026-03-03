@@ -6,10 +6,7 @@ The API is designed to stay as close to the original Lightweight Charts API as
 possible, making migration straightforward:
 
 - **Swift SDK** — native API for macOS and iOS (via Metal)
-- **JavaScript API** — available for the WASM target, requires WebGPU support in
-  the browser (Chrome 113+, Safari 18+)
-- **WebGL / Canvas** — planned. Note: a Canvas 2D target may not be worthwhile
-  since you could use Lightweight Charts natively at that point
+- **JavaScript API** — available for the WASM target
 - **Windows / Linux** — no high-level SDK yet; use the C-ABI directly
   (see [Platform Support](#platform-support))
 
@@ -141,7 +138,23 @@ The **core** is a platform-agnostic Rust library that exposes a C-ABI. It handle
 - Multi-pane layout with add/remove/reorder
 - Crosshair, price lines, and event system
 - Invalidation-driven rendering (only redraws when state changes)
-- GPU rendering via Vello + wgpu
+
+### Rendering Backends
+
+All chart rendering goes through a `DrawBackend` trait with static dispatch
+(`impl DrawBackend`), enabling zero-cost backend selection at compile time.
+The chart renderer is completely backend-agnostic — no Vello, Canvas, or OpenGL
+code exists in the rendering logic.
+
+| Backend | Engine | Best For |
+|---|---|---|
+| **Vello** (default) | wgpu — WebGPU, Metal, Vulkan, DX12 | High-performance GPU rendering |
+| **femtovg** | glow — WebGL2, OpenGL ES | Broad compatibility, no compute shader requirement |
+| **Canvas 2D** | `web_sys` — browser Canvas API | Universal browser fallback (WASM only) |
+
+> femtovg runs on **native** (desktop OpenGL via glow) as well as WASM (WebGL2),
+> making it a cross-platform alternative to Vello on systems where GPU compute
+> shaders aren't available.
 
 **SDKs** wrap the C-ABI with idiomatic, type-safe APIs for each platform:
 - **Swift SDK** — native Swift classes wrapping the C-ABI, with MetalLayer integration
@@ -228,8 +241,17 @@ Both the Swift and WASM demos support:
 
 ## Platform Support
 
-The core uses `wgpu` with automatic backend selection (`Backends::all()`). No
-configuration is needed — the best GPU API is chosen at runtime:
+### Renderer × Platform Matrix
+
+| Backend | WASM | macOS | Linux | Windows |
+|---|---|---|---|---|
+| Vello (WebGPU/Metal/Vulkan) | ✅ | ✅ | ✅ | ✅ |
+| femtovg (WebGL2/OpenGL) | ✅ | ✅ | ✅ | ✅ |
+| Canvas 2D | ✅ | — | — | — |
+
+The default backend is **Vello** which uses `wgpu` with automatic backend
+selection (`Backends::all()`). No configuration is needed — the best GPU API
+is chosen at runtime:
 
 | Platform       | GPU Backend | Surface Source           | SDK                        |
 |----------------|-------------|--------------------------|----------------------------|
