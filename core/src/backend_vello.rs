@@ -13,6 +13,8 @@ use crate::text_render;
 pub struct VelloBackend {
     pub scene: Scene,
     scale: Affine,
+    scale_x: f64,
+    scale_y: f64,
     font: peniko::Font,
 }
 
@@ -21,6 +23,8 @@ impl VelloBackend {
         VelloBackend {
             scene: Scene::new(),
             scale: Affine::IDENTITY,
+            scale_x: 1.0,
+            scale_y: 1.0,
             font: text_render::chart_font(),
         }
     }
@@ -70,6 +74,22 @@ fn build_path(points: &[(f64, f64)], close: bool) -> BezPath {
 }
 
 impl DrawBackend for VelloBackend {
+    fn begin_frame(&mut self, _width: f64, _height: f64) {
+        self.scene.reset();
+    }
+
+    fn end_frame(&mut self) {
+        // No-op for Vello — scene is consumed by render_to_surface.
+    }
+
+    fn set_scale(&mut self, sx: f64, sy: f64) {
+        self.scale_x = sx;
+        self.scale_y = sy;
+        // Vello uses a single Affine transform.
+        // For non-uniform scaling, we compose a scale affine.
+        self.scale = Affine::scale_non_uniform(sx, sy);
+    }
+
     fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color4) {
         self.scene.fill(
             Fill::NonZero,
@@ -186,9 +206,5 @@ impl DrawBackend for VelloBackend {
 
     fn measure_text(&self, text: &str, font_size: f64) -> f64 {
         text_render::measure_text(&self.font, text, font_size as f32) as f64
-    }
-
-    fn set_scale(&mut self, scale: f64) {
-        self.scale = Affine::scale(scale);
     }
 }

@@ -3,7 +3,7 @@
 /// All functions are generic over `impl DrawBackend`, enabling multiple
 /// rendering backends (Vello/WebGPU, Canvas 2D, WebGL/femtovg).
 use crate::chart_state::ChartState;
-use crate::draw_backend::{Color4, DrawBackend};
+use crate::draw_backend::{snap_x, snap_y, Color4, DrawBackend};
 use crate::overlays::{LineStyle, MarkerPosition, MarkerShape};
 use crate::series::{SeriesData, SeriesType};
 use crate::tick_marks::{generate_price_ticks, generate_time_ticks, TickMark};
@@ -35,7 +35,8 @@ pub fn render_bottom_scene(b: &mut impl DrawBackend, state: &ChartState) {
     let layout = &state.layout;
     let time_ticks = generate_time_ticks(&state.data.bars, &state.time_scale, &layout.plot_area);
 
-    b.set_scale(layout.scale_factor);
+    let sf = layout.scale_factor;
+    b.set_scale(sf, sf);
 
     draw_background(b, layout);
     draw_grid(b, state, &time_ticks);
@@ -128,7 +129,8 @@ pub fn render_crosshair_scene(b: &mut impl DrawBackend, state: &ChartState) {
     if !state.crosshair.visible {
         return;
     }
-    b.set_scale(state.layout.scale_factor);
+    let sf = state.layout.scale_factor;
+    b.set_scale(sf, sf);
     draw_crosshair(b, state);
 }
 
@@ -149,10 +151,11 @@ fn draw_grid(b: &mut impl DrawBackend, state: &ChartState, time_ticks: &[TickMar
     }
 
     let grid_color = grid.color;
+    let sf = state.layout.scale_factor;
 
     // Vertical grid lines at time tick positions
     for tick in time_ticks {
-        let x = tick.coord as f64;
+        let x = snap_x(tick.coord as f64, sf);
         let plot = &state.layout.plot_area;
         b.stroke_line(
             x,
@@ -168,7 +171,7 @@ fn draw_grid(b: &mut impl DrawBackend, state: &ChartState, time_ticks: &[TickMar
     for pane in &state.panes {
         let price_ticks = generate_price_ticks(&pane.price_scale, &pane.layout_rect);
         for tick in &price_ticks {
-            let y = tick.coord as f64;
+            let y = snap_y(tick.coord as f64, sf);
             let r = &pane.layout_rect;
             b.stroke_line(r.x as f64, y, (r.x + r.width) as f64, y, grid_color, 1.0);
         }
@@ -215,6 +218,7 @@ fn draw_ohlc_bars(b: &mut impl DrawBackend, pane_index: usize, state: &ChartStat
     let plot_area = &pane.layout_rect;
     let bar_width = state.time_scale.bar_spacing * 0.3;
     let line_width = 1.5;
+    let sf = state.layout.scale_factor;
 
     let (first, last) = state.time_scale.visible_range(plot_area.width);
     let first = first.saturating_sub(1);
@@ -222,7 +226,7 @@ fn draw_ohlc_bars(b: &mut impl DrawBackend, pane_index: usize, state: &ChartStat
 
     for i in first..last {
         let bar = &state.data.bars[i];
-        let x = state.time_scale.index_to_x(i, plot_area) as f64;
+        let x = snap_x(state.time_scale.index_to_x(i, plot_area) as f64, sf);
 
         if x < (plot_area.x - bar_width) as f64
             || x > (plot_area.x + plot_area.width + bar_width) as f64
@@ -232,8 +236,8 @@ fn draw_ohlc_bars(b: &mut impl DrawBackend, pane_index: usize, state: &ChartStat
 
         let high_y = pane.price_scale.price_to_y(bar.high, plot_area) as f64;
         let low_y = pane.price_scale.price_to_y(bar.low, plot_area) as f64;
-        let open_y = pane.price_scale.price_to_y(bar.open, plot_area) as f64;
-        let close_y = pane.price_scale.price_to_y(bar.close, plot_area) as f64;
+        let open_y = snap_y(pane.price_scale.price_to_y(bar.open, plot_area) as f64, sf);
+        let close_y = snap_y(pane.price_scale.price_to_y(bar.close, plot_area) as f64, sf);
 
         let color = if bar.close >= bar.open {
             BULL_COLOR
@@ -241,19 +245,20 @@ fn draw_ohlc_bars(b: &mut impl DrawBackend, pane_index: usize, state: &ChartStat
             BEAR_COLOR
         };
 
-        // High-Low line
+        // High-Low line (vertical wick — snap x only)
         b.stroke_line(x, high_y, x, low_y, color, line_width);
-        // Open tick (left)
+        // Open tick (horizontal — snap y)
         b.stroke_line(x - bar_width as f64, open_y, x, open_y, color, line_width);
-        // Close tick (right)
+        // Close tick (horizontal — snap y)
         b.stroke_line(x, close_y, x + bar_width as f64, close_y, color, line_width);
     }
 }
 
 fn draw_crosshair(b: &mut impl DrawBackend, state: &ChartState) {
     let plot = &state.layout.plot_area;
-    let x = state.crosshair.x as f64;
-    let y = state.crosshair.y as f64;
+    let sf = state.layout.scale_factor;
+    let x = snap_x(state.crosshair.x as f64, sf);
+    let y = snap_y(state.crosshair.y as f64, sf);
 
     // Vertical dashed line
     b.stroke_dashed_line(
@@ -322,11 +327,12 @@ fn draw_y_axis(
     layout: &crate::chart_model::ChartLayout,
 ) {
     let x_start = (layout.plot_area.x + layout.plot_area.width + 5.0) as f64;
+    let sf = layout.scale_factor;
 
     for pane in &state.panes {
         let price_ticks = generate_price_ticks(&pane.price_scale, &pane.layout_rect);
         for tick in &price_ticks {
-            let y = tick.coord as f64;
+            let y = snap_y(tick.coord as f64, sf);
 
             // Tick mark
             let tick_x = (layout.plot_area.x + layout.plot_area.width) as f64;
@@ -351,9 +357,10 @@ fn draw_x_axis(
 ) {
     let plot = &layout.plot_area;
     let y_start = (plot.y + plot.height + 5.0) as f64;
+    let sf = layout.scale_factor;
 
     for tick in time_ticks {
-        let x = tick.coord as f64;
+        let x = snap_x(tick.coord as f64, sf);
 
         // Tick mark
         b.stroke_line(
@@ -384,13 +391,14 @@ fn draw_x_axis(
 fn draw_price_lines(b: &mut impl DrawBackend, state: &ChartState) {
     let pane = &state.panes[0];
     let plot = &pane.layout_rect;
+    let sf = state.layout.scale_factor;
 
     for line in &state.overlays.price_lines {
         let y = pane.price_scale.price_to_y(line.price, plot);
         if y < plot.y || y > plot.y + plot.height {
             continue;
         }
-        let y = y as f64;
+        let y = snap_y(y as f64, sf);
         let color = line.color;
 
         match line.line_style {

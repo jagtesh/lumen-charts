@@ -12,6 +12,20 @@ pub type Color4 = [f32; 4];
 pub type GradientStop = (Color4, f32);
 
 pub trait DrawBackend {
+    // ── Frame lifecycle ─────────────────────────────────────
+
+    /// Begin a new frame. Clears the canvas and sets up the coordinate space.
+    /// `width` and `height` are in logical (CSS) pixels.
+    fn begin_frame(&mut self, width: f64, height: f64);
+
+    /// End the current frame. Flushes any pending draw commands.
+    fn end_frame(&mut self);
+
+    /// Set scale factors for HiDPI rendering.
+    /// `sx` and `sy` are horizontal and vertical pixel ratios respectively.
+    /// On most displays they are equal, but some displays may differ.
+    fn set_scale(&mut self, sx: f64, sy: f64);
+
     // ── Rectangles ──────────────────────────────────────────
 
     /// Fill a rectangle with a solid color.
@@ -76,9 +90,34 @@ pub trait DrawBackend {
 
     /// Measure text width in logical pixels.
     fn measure_text(&self, text: &str, font_size: f64) -> f64;
+}
 
-    // ── Frame lifecycle ─────────────────────────────────────
+// ── Pixel-snap helper ───────────────────────────────────────
 
-    /// Set the global scale factor (for HiDPI).
-    fn set_scale(&mut self, scale: f64);
+/// Snap a coordinate to the nearest device-pixel center for crisp 1px lines.
+///
+/// When a 1px line is drawn at an integer coordinate, it straddles two physical
+/// pixels and gets anti-aliased into a blurry 2px line. By offsetting to the
+/// pixel center (0.5 device pixels), the line lands entirely within one pixel.
+///
+/// # Examples
+/// ```
+/// // At 2x scale: snap(100.3, 2.0) → 100.25 → maps to device pixel 200.5
+/// // At 1x scale: snap(100.3, 1.0) → 100.5
+/// ```
+pub fn snap(coord: f64, scale: f64) -> f64 {
+    if scale <= 0.0 {
+        return coord;
+    }
+    (coord * scale).round() / scale + 0.5 / scale
+}
+
+/// Snap a coordinate for a horizontal line (uses vertical scale).
+pub fn snap_y(coord: f64, sy: f64) -> f64 {
+    snap(coord, sy)
+}
+
+/// Snap a coordinate for a vertical line (uses horizontal scale).
+pub fn snap_x(coord: f64, sx: f64) -> f64 {
+    snap(coord, sx)
 }
