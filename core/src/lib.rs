@@ -21,6 +21,7 @@ pub mod time_scale;
 // ---------------------------------------------------------------------------
 use std::ffi::c_void;
 
+use crate::backend_vello::VelloBackend;
 use crate::chart_model::ChartData;
 use crate::chart_renderer::{render_bottom_scene, render_crosshair_scene};
 use crate::chart_state::ChartState;
@@ -49,7 +50,7 @@ pub type SizeChangeCallback = extern "C" fn(width: f32, height: f32, user_data: 
 /// Fields are public to allow platform-specific initialization (e.g., WASM canvas).
 pub struct Chart {
     pub state: ChartState,
-    pub scene: Scene,
+    pub backend: VelloBackend,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub surface: wgpu::Surface<'static>,
@@ -154,7 +155,7 @@ pub extern "C" fn chart_create(
 
     let chart = Chart {
         state,
-        scene: Scene::new(),
+        backend: backend_vello::VelloBackend::new(),
         device,
         queue,
         surface,
@@ -177,29 +178,31 @@ pub extern "C" fn chart_create(
 
 /// Internal render implementation shared by both explicit and conditional paths.
 fn render_internal(chart: &mut Chart, level: crate::invalidation::InvalidationLevel) {
-    chart.scene.reset();
+    chart.backend.reset();
 
     if level.needs_bottom_scene() {
-        // Light or Full — rebuild the bottom scene
-        let mut bottom = Scene::new();
-        render_bottom_scene(&mut bottom, &chart.state);
-        chart.cached_bottom_scene = Some(bottom.clone());
-        chart.scene.append(&bottom, None);
+        // Light or Full — rebuild the bottom scene via backend
+        let mut bottom_backend = VelloBackend::new();
+        render_bottom_scene(&mut bottom_backend, &chart.state);
+        let bottom_scene = bottom_backend.scene;
+        chart.backend.scene_mut().append(&bottom_scene, None);
+        chart.cached_bottom_scene = Some(bottom_scene);
         chart.state.bottom_render_count += 1;
     } else if let Some(ref cached) = chart.cached_bottom_scene {
         // Cursor only — reuse cached bottom scene
-        chart.scene.append(cached, None);
+        chart.backend.scene_mut().append(cached, None);
     } else {
         // No cache yet — must do full render
-        let mut bottom = Scene::new();
-        render_bottom_scene(&mut bottom, &chart.state);
-        chart.cached_bottom_scene = Some(bottom.clone());
-        chart.scene.append(&bottom, None);
+        let mut bottom_backend = VelloBackend::new();
+        render_bottom_scene(&mut bottom_backend, &chart.state);
+        let bottom_scene = bottom_backend.scene;
+        chart.backend.scene_mut().append(&bottom_scene, None);
+        chart.cached_bottom_scene = Some(bottom_scene);
         chart.state.bottom_render_count += 1;
     }
 
     // Always render crosshair on top
-    render_crosshair_scene(&mut chart.scene, &chart.state);
+    render_crosshair_scene(&mut chart.backend, &chart.state);
     chart.state.crosshair_render_count += 1;
 
     let surface_texture = match chart.surface.get_current_texture() {
@@ -222,7 +225,7 @@ fn render_internal(chart: &mut Chart, level: crate::invalidation::InvalidationLe
         .render_to_surface(
             &chart.device,
             &chart.queue,
-            &chart.scene,
+            chart.backend.scene(),
             &surface_texture,
             &render_params,
         )

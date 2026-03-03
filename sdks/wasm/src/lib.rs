@@ -117,7 +117,7 @@ pub async fn chart_start() {
 
     let chart = Chart {
         state,
-        scene: Scene::new(),
+        backend: lumen_charts::backend_vello::VelloBackend::new(),
         device,
         queue,
         surface,
@@ -127,6 +127,12 @@ pub async fn chart_start() {
         click_cb: None,
         crosshair_move_cb: None,
         dbl_click_cb: None,
+        visible_time_range_cb: None,
+        visible_logical_range_cb: None,
+        size_change_cb: None,
+        prev_visible_time_range: None,
+        prev_visible_logical_range: None,
+        prev_chart_size: None,
     };
 
     // Store as raw pointer

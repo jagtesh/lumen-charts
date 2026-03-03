@@ -6,12 +6,12 @@
 //! - Mask coalescing (multiple interactions merge correctly)
 //! - Render counter accuracy
 
+use lumen_charts::backend_vello::VelloBackend;
 use lumen_charts::chart_model::{ChartData, OhlcBar};
 use lumen_charts::chart_renderer::{render_bottom_scene, render_crosshair_scene};
 use lumen_charts::chart_state::ChartState;
 use lumen_charts::invalidation::InvalidationLevel;
 use lumen_charts::sample_data::sample_data;
-use vello::Scene;
 
 fn make_state() -> ChartState {
     let data = ChartData {
@@ -31,15 +31,15 @@ fn simulate_render(state: &mut ChartState) -> InvalidationLevel {
         return InvalidationLevel::None;
     }
 
-    let mut scene = Scene::new();
+    let mut backend = VelloBackend::new();
 
     if level.needs_bottom_scene() {
-        render_bottom_scene(&mut scene, state);
+        render_bottom_scene(&mut backend, state);
         state.bottom_render_count += 1;
     }
     // For cursor-only, we skip bottom scene (would reuse cache in real impl)
 
-    render_crosshair_scene(&mut scene, state);
+    render_crosshair_scene(&mut backend, state);
     state.crosshair_render_count += 1;
 
     level
@@ -405,22 +405,20 @@ fn test_render_counter_accuracy() {
 #[test]
 fn test_render_bottom_scene_produces_scene_content() {
     let state = make_state();
-    let mut scene = Scene::new();
-    render_bottom_scene(&mut scene, &state);
-    // Scene should have content (we can't easily inspect Vello scenes,
-    // but we can verify it doesn't panic and the function returns).
-    // The encoding has a non-zero size.
-    let encoded = scene.encoding();
+    let mut backend = VelloBackend::new();
+    render_bottom_scene(&mut backend, &state);
+    // Backend scene should have content — verify encoding is non-empty.
+    let encoded = backend.scene.encoding();
     assert!(!encoded.is_empty(), "bottom scene should have content");
 }
 
 #[test]
 fn test_render_crosshair_scene_empty_when_not_visible() {
     let state = make_state();
-    let mut scene = Scene::new();
+    let mut backend = VelloBackend::new();
     assert!(!state.crosshair.visible);
-    render_crosshair_scene(&mut scene, &state);
-    let encoded = scene.encoding();
+    render_crosshair_scene(&mut backend, &state);
+    let encoded = backend.scene.encoding();
     assert!(
         encoded.is_empty(),
         "crosshair scene should be empty when not visible"
@@ -435,9 +433,9 @@ fn test_render_crosshair_scene_has_content_when_visible() {
     state.pointer_move(cx, cy);
     assert!(state.crosshair.visible);
 
-    let mut scene = Scene::new();
-    render_crosshair_scene(&mut scene, &state);
-    let encoded = scene.encoding();
+    let mut backend = VelloBackend::new();
+    render_crosshair_scene(&mut backend, &state);
+    let encoded = backend.scene.encoding();
     assert!(
         !encoded.is_empty(),
         "crosshair scene should have content when visible"
