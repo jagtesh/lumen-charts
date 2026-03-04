@@ -2,10 +2,11 @@
 name = "rust-demo"
 version = "0.1.0"
 edition = "2021"
+authors = ["Jagtesh Chadha"]
 publish = false
 
 [dependencies]
-lumen-charts = "1.0.0"
+lumen-charts = "2.0.0"
 vello = "0.4"
 winit = "0.30"
 wgpu = "23"
