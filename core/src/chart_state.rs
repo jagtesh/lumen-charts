@@ -1091,6 +1091,7 @@ impl ChartState {
             Err(idx) => {
                 self.data.bars.insert(idx, bar);
                 self.time_scale = TimeScale::new(self.data.bars.len(), self.layout.plot_area.width);
+                self.rebuild_time_index();
             }
         }
         self.update_price_scale();
