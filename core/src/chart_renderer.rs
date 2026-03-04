@@ -445,6 +445,30 @@ fn draw_price_lines(b: &mut impl DrawBackend, state: &ChartState, pane_idx: usiz
                     3.0,
                 );
             }
+            LineStyle::LargeDashed => {
+                b.stroke_dashed_line(
+                    plot.x as f64,
+                    y,
+                    (plot.x + plot.width) as f64,
+                    y,
+                    color,
+                    line.line_width as f64,
+                    6.0,
+                    6.0,
+                );
+            }
+            LineStyle::SparseDotted => {
+                b.stroke_dashed_line(
+                    plot.x as f64,
+                    y,
+                    (plot.x + plot.width) as f64,
+                    y,
+                    color,
+                    line.line_width as f64,
+                    1.0,
+                    4.0,
+                );
+            }
             LineStyle::Solid => {
                 b.stroke_line(
                     plot.x as f64,

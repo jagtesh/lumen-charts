@@ -11,6 +11,8 @@ pub enum LineStyle {
     Solid,
     Dashed,
     Dotted,
+    LargeDashed,
+    SparseDotted,
 }
 
 impl Default for LineStyle {
