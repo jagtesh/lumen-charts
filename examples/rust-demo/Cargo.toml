@@ -6,7 +6,7 @@ authors = ["Jagtesh Chadha"]
 publish = false
 
 [dependencies]
-lumen-charts = "2.0.0"
+lumen-charts = "1.0.0"
 vello = "0.4"
 winit = "0.30"
 wgpu = "23"

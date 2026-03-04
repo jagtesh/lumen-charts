@@ -19,3 +19,4 @@ rust-version = "1.75"
 [dependencies]
 lumen-charts-core = { path = "core", version = "2.0.0" }
 lumen-charts-sdk = { path = "rust-sdk", version = "1.0.0" }
+lumen-charts-wasm = { path = "sdks/wasm", version = "1.0.0" }
