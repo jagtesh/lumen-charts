@@ -690,6 +690,79 @@ impl SeriesCollection {
     pub fn is_empty(&self) -> bool {
         self.series.is_empty()
     }
+
+    /// Get the pane index for a series. Returns None if not found.
+    pub fn get_pane_index(&self, series_id: u32) -> Option<usize> {
+        self.get(series_id).map(|s| s.pane_index)
+    }
+
+    /// Get the z-order of a series within its pane. Returns None if not found.
+    pub fn series_order(&self, series_id: u32) -> Option<u32> {
+        let series = self.get(series_id)?;
+        let pane_idx = series.pane_index;
+        let mut order = 0u32;
+        for s in self.series.iter() {
+            if s.pane_index == pane_idx {
+                if s.id == series_id {
+                    return Some(order);
+                }
+                order += 1;
+            }
+        }
+        None
+    }
+
+    /// Set the z-order of a series within its pane. Returns true on success.
+    pub fn set_series_order(&mut self, series_id: u32, order: u32) -> bool {
+        let pane_idx = match self.get(series_id) {
+            Some(s) => s.pane_index,
+            None => return false,
+        };
+        // Collect indices of series in this pane, in current order
+        let mut pane_series_indices: Vec<usize> = self
+            .series
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.pane_index == pane_idx)
+            .map(|(i, _)| i)
+            .collect();
+        let current_pos = pane_series_indices
+            .iter()
+            .position(|&i| self.series[i].id == series_id);
+        let current_pos = match current_pos {
+            Some(p) => p,
+            None => return false,
+        };
+        let target_pos = (order as usize).min(pane_series_indices.len() - 1);
+        if current_pos != target_pos {
+            let removed = pane_series_indices.remove(current_pos);
+            pane_series_indices.insert(target_pos, removed);
+            let mut reordered = Vec::with_capacity(self.series.len());
+            let mut pane_iter = pane_series_indices.iter();
+            for s in self.series.iter() {
+                if s.pane_index == pane_idx {
+                    if let Some(&reorder_idx) = pane_iter.next() {
+                        reordered.push(self.series[reorder_idx].clone());
+                    }
+                } else {
+                    reordered.push(s.clone());
+                }
+            }
+            self.series = reordered;
+        }
+        true
+    }
+
+    /// Pop (remove) the last `count` data points from a series.
+    /// Returns true if the series was found.
+    pub fn pop_series(&mut self, series_id: u32, count: usize) -> bool {
+        if let Some(series) = self.get_mut(series_id) {
+            series.data.pop(count);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

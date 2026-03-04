@@ -959,12 +959,12 @@ pub extern "C" fn chart_series_pop(chart: *mut Chart, series_id: u32, count: u32
         assert!(!chart.is_null());
         &mut *chart
     };
-    if let Some(series) = chart.state.series.get_mut(series_id) {
-        series.data.pop(count as usize);
+    if chart.state.series.pop_series(series_id, count as usize) {
         chart.state.series_data_changed();
-        return true;
+        true
+    } else {
+        false
     }
-    false
 }
 
 /// Get the number of bars.
@@ -1844,8 +1844,8 @@ pub extern "C" fn chart_series_get_pane_index(chart: *const Chart, series_id: u3
     chart
         .state
         .series
-        .get(series_id)
-        .map(|s| s.pane_index as u32)
+        .get_pane_index(series_id)
+        .map(|i| i as u32)
         .unwrap_or(u32::MAX)
 }
 
@@ -1856,20 +1856,11 @@ pub extern "C" fn chart_series_order(chart: *const Chart, series_id: u32) -> u32
         assert!(!chart.is_null());
         &*chart
     };
-    if let Some(series) = chart.state.series.get(series_id) {
-        let pane_idx = series.pane_index;
-        // Count how many series in this pane appear before this one
-        let mut order = 0u32;
-        for s in chart.state.series.series.iter() {
-            if s.pane_index == pane_idx {
-                if s.id == series_id {
-                    return order;
-                }
-                order += 1;
-            }
-        }
-    }
-    u32::MAX
+    chart
+        .state
+        .series
+        .series_order(series_id)
+        .unwrap_or(u32::MAX)
 }
 
 /// Set the z-order of a series within its pane. Returns true on success.
@@ -1879,58 +1870,15 @@ pub extern "C" fn chart_series_set_order(chart: *mut Chart, series_id: u32, orde
         assert!(!chart.is_null());
         &mut *chart
     };
-    // Find the series and its pane
-    let pane_idx = match chart.state.series.get(series_id) {
-        Some(s) => s.pane_index,
-        None => return false,
-    };
-    // Collect indices of series in this pane, in current order
-    let mut pane_series_indices: Vec<usize> = chart
-        .state
-        .series
-        .series
-        .iter()
-        .enumerate()
-        .filter(|(_, s)| s.pane_index == pane_idx)
-        .map(|(i, _)| i)
-        .collect();
-    // Find current position of the target series in pane ordering
-    let current_pos = pane_series_indices
-        .iter()
-        .position(|&i| chart.state.series.series[i].id == series_id);
-    let current_pos = match current_pos {
-        Some(p) => p,
-        None => return false,
-    };
-    let target_pos = (order as usize).min(pane_series_indices.len() - 1);
-    if current_pos != target_pos {
-        // Remove from current, insert at target
-        let removed = pane_series_indices.remove(current_pos);
-        pane_series_indices.insert(target_pos, removed);
-        // Rebuild the full series vec with this new ordering
-        // (This is a simple approach; could optimize for large collections)
-        let mut reordered = Vec::with_capacity(chart.state.series.series.len());
-        let mut used = vec![false; chart.state.series.series.len()];
-        // First, add non-pane series in original order, interleaving pane series at their positions
-        let mut pane_iter = pane_series_indices.iter();
-        for (i, s) in chart.state.series.series.iter().enumerate() {
-            if s.pane_index == pane_idx {
-                if let Some(&reorder_idx) = pane_iter.next() {
-                    reordered.push(chart.state.series.series[reorder_idx].clone());
-                    used[reorder_idx] = true;
-                }
-            } else {
-                reordered.push(s.clone());
-                used[i] = true;
-            }
-        }
-        chart.state.series.series = reordered;
+    if chart.state.series.set_series_order(series_id, order) {
         chart
             .state
             .pending_mask
             .set_global(crate::invalidation::InvalidationLevel::Full);
+        true
+    } else {
+        false
     }
-    true
 }
 
 // ── v5 Event series data accessor ──
