@@ -327,7 +327,7 @@ pub fn chart_add_baseline_series(data: &[f64], base_value: f64) -> u32 {
 #[wasm_bindgen]
 pub fn chart_remove_series(id: u32) -> bool { lumen_charts::chart_remove_series(ptr(), id) }
 
-// === Series / Panes management ===
+// === Series / Panes management (v5: index-based) ===
 
 #[wasm_bindgen]
 pub fn chart_series_count() -> u32 { lumen_charts::chart_series_count(ptr()) }
@@ -336,11 +336,35 @@ pub fn chart_series_count() -> u32 { lumen_charts::chart_series_count(ptr()) }
 pub fn chart_add_pane(height_stretch: f32) -> u32 { lumen_charts::chart_add_pane(ptr(), height_stretch) }
 
 #[wasm_bindgen]
-pub fn chart_remove_pane(pane_id: u32) -> bool { lumen_charts::chart_remove_pane(ptr(), pane_id) }
+pub fn chart_remove_pane(pane_index: u32) -> bool { lumen_charts::chart_remove_pane(ptr(), pane_index) }
 
 #[wasm_bindgen]
-pub fn chart_series_move_to_pane(series_id: u32, pane_id: u32) -> bool { 
-    lumen_charts::chart_series_move_to_pane(ptr(), series_id, pane_id) 
+pub fn chart_swap_panes(a: u32, b: u32) -> bool { lumen_charts::chart_swap_panes(ptr(), a, b) }
+
+#[wasm_bindgen]
+pub fn chart_pane_count() -> u32 { lumen_charts::chart_pane_count(ptr()) }
+
+#[wasm_bindgen]
+pub fn chart_series_move_to_pane(series_id: u32, pane_index: u32) -> bool { 
+    lumen_charts::chart_series_move_to_pane(ptr(), series_id, pane_index) 
+}
+
+// v5: ISeriesApi.getPane() — returns the pane index
+#[wasm_bindgen]
+pub fn chart_series_get_pane_index(series_id: u32) -> u32 {
+    lumen_charts::chart_series_get_pane_index(ptr(), series_id)
+}
+
+// v5: ISeriesApi.seriesOrder() — z-order within pane
+#[wasm_bindgen]
+pub fn chart_series_order(series_id: u32) -> u32 {
+    lumen_charts::chart_series_order(ptr(), series_id)
+}
+
+// v5: ISeriesApi.setSeriesOrder(order)
+#[wasm_bindgen]
+pub fn chart_series_set_order(series_id: u32, order: u32) -> bool {
+    lumen_charts::chart_series_set_order(ptr(), series_id, order)
 }
 
 // === Options ===

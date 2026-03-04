@@ -499,6 +499,13 @@ impl ApplicationHandler for App {
         let response = state.egui_state.on_window_event(&state.window, &event);
         let egui_wants_input = response.consumed;
 
+        // egui needs a follow-up frame after consuming input events to process
+        // interactions like .clicked() (which triggers on pointer release).
+        // Without this redraw, button clicks are lost sporadically.
+        if response.repaint || egui_wants_input {
+            state.window.request_redraw();
+        }
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {

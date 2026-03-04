@@ -26,7 +26,8 @@ possible, making migration straightforward:
 │   ├── src/            Source code
 │   ├── include/        C header (chart_core.h)
 │   └── target/         Build output (cargo build --release)
-├── sdks/
+├── sdks/               SDK Reference → [sdks/README.md](sdks/README.md)
+│   ├── rust/           Rust SDK (lumen-charts-sdk crate)
 │   ├── swift/          Swift wrapper (LightweightCharts module)
 │   └── wasm/           WebAssembly bindings + JS API wrapper
 │       ├── src/        wasm-bindgen zero-cost passthrough to C-ABI
@@ -195,30 +196,39 @@ code exists in the rendering logic.
 
 ### Rust SDK
 
-The `Chart` struct provides safe, idiomatic methods — no `unsafe` or raw pointers:
+The `lumen-charts-sdk` crate wraps `Chart` with safe, idiomatic v5 methods —
+no `unsafe` or raw pointers needed:
 
 ```rust
-use lumen_charts::{Chart, backend_vello::VelloRenderer, sample_data::sample_data};
+use lumen_charts_sdk::{ChartApi, SeriesDefinition};
 
-// Create a renderer and chart
-let renderer = VelloRenderer::new(instance, surface, width, height, scale);
-let mut chart = Chart::new_with_renderer(Box::new(renderer), width, height, scale);
-
-// Load data and interact
+// Create chart and load data
+let mut chart = ChartApi::with_renderer(Box::new(renderer), width, height, scale);
 chart.set_data(sample_data());
 chart.fit_content();
 chart.render();
 
-// Event handling
-if chart.pointer_move(x, y) { /* redraw */ }
-if chart.scroll(dx, dy) { /* redraw */ }
-chart.resize(new_w, new_h, scale);
-chart.set_series_type(1); // Candlestick
+// v5 unified addSeries
+let overlay = chart.add_series(SeriesDefinition::Area);
+overlay.set_line_data(&mut chart, &line_points);
+
+// Multi-pane
+let pane = chart.add_pane(0.3);
+let hist = chart.add_series(SeriesDefinition::Histogram);
+hist.move_to_pane(&mut chart, &pane);
+
+// Input handling (all return bool = needs redraw)
+chart.pointer_move(x, y);
+chart.scroll(dx, 0.0);
+chart.zoom(factor, center_x);
+chart.pinch(scale, cx, cy);
 ```
+
+> Full SDK reference with Swift and JS examples → [sdks/README.md](sdks/README.md)
 
 ## API Completeness
 
-Lumen Charts targets **full parity** with [Lightweight Charts v4](https://tradingview.github.io/lightweight-charts/). Current coverage:
+Lumen Charts targets **full parity** with [Lightweight Charts v5](https://tradingview.github.io/lightweight-charts/). Current coverage:
 
 | Interface | Coverage | Notes |
 |---|---|---|
@@ -257,15 +267,15 @@ chart.setData([
 ]);
 
 // Switch rendering type (data stays the same)
-chart.setSeriesType('candlestick');  // 'ohlc' | 'candlestick' | 'line' | 'area' | 'histogram' | 'baseline'
+chart.setSeriesType('candlestick');
 
-// Add overlay series
-const overlay = chart.addAreaSeries({ lineColor: '#2962FF' });
+// v5 unified addSeries
+const overlay = chart.addSeries('area', { lineColor: '#2962FF' });
 overlay.setData([{ time: 1704153600, value: 186.3 }, /* ... */]);
 
 // Multi-pane support
 const macdPane = chart.addPane(0.3);
-const histSeries = chart.addHistogramSeries({});
+const histSeries = chart.addSeries('histogram', {});
 histSeries.moveToPane(macdPane);
 histSeries.setData([{ time: 1704153600, value: 0.5 }, /* ... */]);
 

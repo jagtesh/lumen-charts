@@ -109,6 +109,11 @@ class ChartAPI {
 
     removeSeries(series) {
         this.wasm.chart_remove_series(series.id);
+        this.wasm.chart_render_if_needed();
+    }
+
+    seriesCount() {
+        return this.wasm.chart_series_count();
     }
 
     applyOptions(options) {
@@ -124,6 +129,14 @@ class ChartAPI {
 
     removePane(pane) {
         this.wasm.chart_remove_pane(pane.index);
+    }
+
+    swapPanes(a, b) {
+        return this.wasm.chart_swap_panes(a.index, b.index);
+    }
+
+    paneCount() {
+        return this.wasm.chart_pane_count();
     }
 
     timeScale() {
