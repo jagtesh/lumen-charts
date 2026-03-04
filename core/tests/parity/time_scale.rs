@@ -1,6 +1,6 @@
 /// Parity tests from LWC: tests/unittests/time-scale.spec.ts
-use lumen_charts::chart_model::{OhlcBar, Rect};
-use lumen_charts::time_scale::TimeScale;
+use lumen_charts_core::chart_model::{OhlcBar, Rect};
+use lumen_charts_core::time_scale::TimeScale;
 
 fn make_bars(count: usize) -> Vec<OhlcBar> {
     (0..count)

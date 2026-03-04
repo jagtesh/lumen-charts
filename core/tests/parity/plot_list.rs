@@ -1,8 +1,8 @@
 /// Parity tests from LWC: tests/unittests/plot-list.spec.ts
 ///
 /// Min/max per OHLC field, gap handling, ranged queries, search.
-use lumen_charts::chart_model::OhlcBar;
-use lumen_charts::data_layer::DataLayer;
+use lumen_charts_core::chart_model::OhlcBar;
+use lumen_charts_core::data_layer::DataLayer;
 
 fn ohlc(time: i64, o: f64, h: f64, l: f64, c: f64) -> OhlcBar {
     OhlcBar {

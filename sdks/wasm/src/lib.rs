@@ -8,8 +8,8 @@ use wasm_bindgen::prelude::*;
 use vello::wgpu;
 use vello::{Renderer as VelloRenderer, RendererOptions};
 
-use lumen_charts::Chart;
-use lumen_charts::chart_model::ChartData;
+use lumen_charts_core::Chart;
+use lumen_charts_core::chart_model::ChartData;
 
 // Single global chart pointer (WASM is single-threaded, no need for thread_local)
 static mut CHART_PTR: *mut Chart = std::ptr::null_mut();
@@ -108,7 +108,7 @@ pub async fn chart_start() {
     .expect("Failed to create Vello renderer");
 
     // Create VelloRenderer from pre-created GPU resources
-    let pipeline = lumen_charts::renderers::VelloRenderer::new_from_parts(
+    let pipeline = lumen_charts_core::renderers::VelloRenderer::new_from_parts(
         device, queue, surface, surface_config, vello_renderer,
     );
 
@@ -125,8 +125,8 @@ pub async fn chart_start() {
     unsafe { CHART_PTR = chart_ptr; }
 
     // Fit content + render
-    lumen_charts::chart_fit_content(chart_ptr);
-    lumen_charts::chart_render(chart_ptr);
+    lumen_charts_core::chart_fit_content(chart_ptr);
+    lumen_charts_core::chart_render(chart_ptr);
 
     log::info!("Chart rendered and interactive!");
 }
@@ -168,7 +168,7 @@ pub fn chart_start_canvas2d() {
         .unwrap();
 
     // Create Canvas2D pipeline
-    let pipeline = lumen_charts::renderers::Canvas2DRenderer::new(ctx);
+    let pipeline = lumen_charts_core::renderers::Canvas2DRenderer::new(ctx);
 
     // Create Chart with Canvas2D renderer
     let mut chart = Chart::new_with_renderer(Box::new(pipeline), width, height, scale_factor);
@@ -186,8 +186,8 @@ pub fn chart_start_canvas2d() {
     unsafe { CHART_PTR = chart_ptr; }
 
     // Fit content + render
-    lumen_charts::chart_fit_content(chart_ptr);
-    lumen_charts::chart_render(chart_ptr);
+    lumen_charts_core::chart_fit_content(chart_ptr);
+    lumen_charts_core::chart_render(chart_ptr);
 
     log::info!("Canvas 2D chart rendered and interactive!");
 }
@@ -195,56 +195,56 @@ pub fn chart_start_canvas2d() {
 // === Rendering ===
 
 #[wasm_bindgen]
-pub fn chart_render() { lumen_charts::chart_render(ptr()); }
+pub fn chart_render() { lumen_charts_core::chart_render(ptr()); }
 
 #[wasm_bindgen]
-pub fn chart_render_if_needed() -> bool { lumen_charts::chart_render_if_needed(ptr()) }
+pub fn chart_render_if_needed() -> bool { lumen_charts_core::chart_render_if_needed(ptr()) }
 
 // === Interactions ===
 
 #[wasm_bindgen]
-pub fn chart_pointer_move(x: f32, y: f32) -> bool { lumen_charts::chart_pointer_move(ptr(), x, y) }
+pub fn chart_pointer_move(x: f32, y: f32) -> bool { lumen_charts_core::chart_pointer_move(ptr(), x, y) }
 
 #[wasm_bindgen]
-pub fn chart_pointer_down(x: f32, y: f32) -> bool { lumen_charts::chart_pointer_down(ptr(), x, y, 0) }
+pub fn chart_pointer_down(x: f32, y: f32) -> bool { lumen_charts_core::chart_pointer_down(ptr(), x, y, 0) }
 
 #[wasm_bindgen]
-pub fn chart_pointer_up(x: f32, y: f32) -> bool { lumen_charts::chart_pointer_up(ptr(), x, y, 0) }
+pub fn chart_pointer_up(x: f32, y: f32) -> bool { lumen_charts_core::chart_pointer_up(ptr(), x, y, 0) }
 
 #[wasm_bindgen]
-pub fn chart_pointer_leave() -> bool { lumen_charts::chart_pointer_leave(ptr()) }
+pub fn chart_pointer_leave() -> bool { lumen_charts_core::chart_pointer_leave(ptr()) }
 
 #[wasm_bindgen]
-pub fn chart_scroll(dx: f32, dy: f32) -> bool { lumen_charts::chart_scroll(ptr(), dx, dy) }
+pub fn chart_scroll(dx: f32, dy: f32) -> bool { lumen_charts_core::chart_scroll(ptr(), dx, dy) }
 
 #[wasm_bindgen]
-pub fn chart_zoom(factor: f32, cx: f32) -> bool { lumen_charts::chart_zoom(ptr(), factor, cx) }
+pub fn chart_zoom(factor: f32, cx: f32) -> bool { lumen_charts_core::chart_zoom(ptr(), factor, cx) }
 
 #[wasm_bindgen]
-pub fn chart_pinch(scale: f32, cx: f32, cy: f32) -> bool { lumen_charts::chart_pinch(ptr(), scale, cx, cy) }
+pub fn chart_pinch(scale: f32, cx: f32, cy: f32) -> bool { lumen_charts_core::chart_pinch(ptr(), scale, cx, cy) }
 
 #[wasm_bindgen]
-pub fn chart_fit_content() -> bool { lumen_charts::chart_fit_content(ptr()) }
+pub fn chart_fit_content() -> bool { lumen_charts_core::chart_fit_content(ptr()) }
 
 #[wasm_bindgen]
-pub fn chart_key_down(key_code: u32) -> bool { lumen_charts::chart_key_down(ptr(), key_code) }
+pub fn chart_key_down(key_code: u32) -> bool { lumen_charts_core::chart_key_down(ptr(), key_code) }
 
 #[wasm_bindgen]
-pub fn chart_tick() { lumen_charts::chart_tick(ptr()); }
+pub fn chart_tick() { lumen_charts_core::chart_tick(ptr()); }
 
 // === Touch events ===
 
 #[wasm_bindgen]
-pub fn chart_touch_start(id: u32, x: f32, y: f32) -> bool { lumen_charts::chart_touch_start(ptr(), id, x, y) }
+pub fn chart_touch_start(id: u32, x: f32, y: f32) -> bool { lumen_charts_core::chart_touch_start(ptr(), id, x, y) }
 
 #[wasm_bindgen]
-pub fn chart_touch_move(id: u32, x: f32, y: f32) -> bool { lumen_charts::chart_touch_move(ptr(), id, x, y) }
+pub fn chart_touch_move(id: u32, x: f32, y: f32) -> bool { lumen_charts_core::chart_touch_move(ptr(), id, x, y) }
 
 #[wasm_bindgen]
-pub fn chart_touch_end(id: u32) -> bool { lumen_charts::chart_touch_end(ptr(), id) != 0 }
+pub fn chart_touch_end(id: u32) -> bool { lumen_charts_core::chart_touch_end(ptr(), id) != 0 }
 
 #[wasm_bindgen]
-pub fn chart_touch_tick() { lumen_charts::chart_touch_tick(ptr()); }
+pub fn chart_touch_tick() { lumen_charts_core::chart_touch_tick(ptr()); }
 
 // === Data management ===
 
@@ -253,14 +253,14 @@ pub fn chart_set_data(data: &[f64]) {
     let count = data.len() / 5;
     let flat = data.as_ptr();
     // C-ABI expects *const f64 and count
-    lumen_charts::chart_set_data(ptr(), flat, count as u32);
+    lumen_charts_core::chart_set_data(ptr(), flat, count as u32);
 }
 
 #[wasm_bindgen]
-pub fn chart_set_series_type(t: u32) -> bool { lumen_charts::chart_set_series_type(ptr(), t) }
+pub fn chart_set_series_type(t: u32) -> bool { lumen_charts_core::chart_set_series_type(ptr(), t) }
 
 #[wasm_bindgen]
-pub fn chart_bar_count() -> u32 { lumen_charts::chart_bar_count(ptr()) }
+pub fn chart_bar_count() -> u32 { lumen_charts_core::chart_bar_count(ptr()) }
 
 // === Series management ===
 
@@ -269,7 +269,7 @@ pub fn chart_add_line_series(data: &[f64]) -> u32 {
     let count = (data.len() / 2) as u32;
     let times: Vec<i64> = (0..count as usize).map(|i| data[i * 2] as i64).collect();
     let values: Vec<f64> = (0..count as usize).map(|i| data[i * 2 + 1]).collect();
-    lumen_charts::chart_add_line_series(ptr(), times.as_ptr(), values.as_ptr(), count)
+    lumen_charts_core::chart_add_line_series(ptr(), times.as_ptr(), values.as_ptr(), count)
 }
 
 #[wasm_bindgen]
@@ -277,7 +277,7 @@ pub fn chart_add_area_series(data: &[f64]) -> u32 {
     let count = (data.len() / 2) as u32;
     let times: Vec<i64> = (0..count as usize).map(|i| data[i * 2] as i64).collect();
     let values: Vec<f64> = (0..count as usize).map(|i| data[i * 2 + 1]).collect();
-    lumen_charts::chart_add_area_series(ptr(), times.as_ptr(), values.as_ptr(), count)
+    lumen_charts_core::chart_add_area_series(ptr(), times.as_ptr(), values.as_ptr(), count)
 }
 
 #[wasm_bindgen]
@@ -285,7 +285,7 @@ pub fn chart_add_histogram_series(data: &[f64]) -> u32 {
     let count = (data.len() / 2) as u32;
     let times: Vec<i64> = (0..count as usize).map(|i| data[i * 2] as i64).collect();
     let values: Vec<f64> = (0..count as usize).map(|i| data[i * 2 + 1]).collect();
-    lumen_charts::chart_add_histogram_series(
+    lumen_charts_core::chart_add_histogram_series(
         ptr(), times.as_ptr(), values.as_ptr(), std::ptr::null(), count,
     )
 }
@@ -298,7 +298,7 @@ pub fn chart_add_ohlc_series(data: &[f64]) -> u32 {
     let highs: Vec<f64> = (0..count as usize).map(|i| data[i * 5 + 2]).collect();
     let lows: Vec<f64> = (0..count as usize).map(|i| data[i * 5 + 3]).collect();
     let closes: Vec<f64> = (0..count as usize).map(|i| data[i * 5 + 4]).collect();
-    lumen_charts::chart_add_ohlc_series(
+    lumen_charts_core::chart_add_ohlc_series(
         ptr(), times.as_ptr(), opens.as_ptr(), highs.as_ptr(), lows.as_ptr(), closes.as_ptr(), count,
     )
 }
@@ -311,7 +311,7 @@ pub fn chart_add_candlestick_series(data: &[f64]) -> u32 {
     let highs: Vec<f64> = (0..count as usize).map(|i| data[i * 5 + 2]).collect();
     let lows: Vec<f64> = (0..count as usize).map(|i| data[i * 5 + 3]).collect();
     let closes: Vec<f64> = (0..count as usize).map(|i| data[i * 5 + 4]).collect();
-    lumen_charts::chart_add_candlestick_series(
+    lumen_charts_core::chart_add_candlestick_series(
         ptr(), times.as_ptr(), opens.as_ptr(), highs.as_ptr(), lows.as_ptr(), closes.as_ptr(), count,
     )
 }
@@ -321,50 +321,50 @@ pub fn chart_add_baseline_series(data: &[f64], base_value: f64) -> u32 {
     let count = (data.len() / 2) as u32;
     let times: Vec<i64> = (0..count as usize).map(|i| data[i * 2] as i64).collect();
     let values: Vec<f64> = (0..count as usize).map(|i| data[i * 2 + 1]).collect();
-    lumen_charts::chart_add_baseline_series(ptr(), times.as_ptr(), values.as_ptr(), count, base_value)
+    lumen_charts_core::chart_add_baseline_series(ptr(), times.as_ptr(), values.as_ptr(), count, base_value)
 }
 
 #[wasm_bindgen]
-pub fn chart_remove_series(id: u32) -> bool { lumen_charts::chart_remove_series(ptr(), id) }
+pub fn chart_remove_series(id: u32) -> bool { lumen_charts_core::chart_remove_series(ptr(), id) }
 
 // === Series / Panes management (v5: index-based) ===
 
 #[wasm_bindgen]
-pub fn chart_series_count() -> u32 { lumen_charts::chart_series_count(ptr()) }
+pub fn chart_series_count() -> u32 { lumen_charts_core::chart_series_count(ptr()) }
 
 #[wasm_bindgen]
-pub fn chart_add_pane(height_stretch: f32) -> u32 { lumen_charts::chart_add_pane(ptr(), height_stretch) }
+pub fn chart_add_pane(height_stretch: f32) -> u32 { lumen_charts_core::chart_add_pane(ptr(), height_stretch) }
 
 #[wasm_bindgen]
-pub fn chart_remove_pane(pane_index: u32) -> bool { lumen_charts::chart_remove_pane(ptr(), pane_index) }
+pub fn chart_remove_pane(pane_index: u32) -> bool { lumen_charts_core::chart_remove_pane(ptr(), pane_index) }
 
 #[wasm_bindgen]
-pub fn chart_swap_panes(a: u32, b: u32) -> bool { lumen_charts::chart_swap_panes(ptr(), a, b) }
+pub fn chart_swap_panes(a: u32, b: u32) -> bool { lumen_charts_core::chart_swap_panes(ptr(), a, b) }
 
 #[wasm_bindgen]
-pub fn chart_pane_count() -> u32 { lumen_charts::chart_pane_count(ptr()) }
+pub fn chart_pane_count() -> u32 { lumen_charts_core::chart_pane_count(ptr()) }
 
 #[wasm_bindgen]
 pub fn chart_series_move_to_pane(series_id: u32, pane_index: u32) -> bool { 
-    lumen_charts::chart_series_move_to_pane(ptr(), series_id, pane_index) 
+    lumen_charts_core::chart_series_move_to_pane(ptr(), series_id, pane_index) 
 }
 
 // v5: ISeriesApi.getPane() — returns the pane index
 #[wasm_bindgen]
 pub fn chart_series_get_pane_index(series_id: u32) -> u32 {
-    lumen_charts::chart_series_get_pane_index(ptr(), series_id)
+    lumen_charts_core::chart_series_get_pane_index(ptr(), series_id)
 }
 
 // v5: ISeriesApi.seriesOrder() — z-order within pane
 #[wasm_bindgen]
 pub fn chart_series_order(series_id: u32) -> u32 {
-    lumen_charts::chart_series_order(ptr(), series_id)
+    lumen_charts_core::chart_series_order(ptr(), series_id)
 }
 
 // v5: ISeriesApi.setSeriesOrder(order)
 #[wasm_bindgen]
 pub fn chart_series_set_order(series_id: u32, order: u32) -> bool {
-    lumen_charts::chart_series_set_order(ptr(), series_id, order)
+    lumen_charts_core::chart_series_set_order(ptr(), series_id, order)
 }
 
 // === Options ===
@@ -372,61 +372,61 @@ pub fn chart_series_set_order(series_id: u32, order: u32) -> bool {
 #[wasm_bindgen]
 pub fn chart_apply_options(json: &str) -> bool {
     let cstr = std::ffi::CString::new(json).unwrap();
-    lumen_charts::chart_apply_options(ptr(), cstr.as_ptr())
+    lumen_charts_core::chart_apply_options(ptr(), cstr.as_ptr())
 }
 
 #[wasm_bindgen]
 pub fn chart_series_apply_options(series_id: u32, json: &str) -> bool {
     let cstr = std::ffi::CString::new(json).unwrap();
-    lumen_charts::chart_series_apply_options(ptr(), series_id, cstr.as_ptr())
+    lumen_charts_core::chart_series_apply_options(ptr(), series_id, cstr.as_ptr())
 }
 
 // === Coordinate translation ===
 
 #[wasm_bindgen]
-pub fn chart_price_to_coordinate(pane_index: u32, price: f64) -> f32 { lumen_charts::chart_price_to_coordinate(ptr(), pane_index, price) }
+pub fn chart_price_to_coordinate(pane_index: u32, price: f64) -> f32 { lumen_charts_core::chart_price_to_coordinate(ptr(), pane_index, price) }
 
 #[wasm_bindgen]
-pub fn chart_coordinate_to_price(pane_index: u32, y: f32) -> f64 { lumen_charts::chart_coordinate_to_price(ptr(), pane_index, y) }
+pub fn chart_coordinate_to_price(pane_index: u32, y: f32) -> f64 { lumen_charts_core::chart_coordinate_to_price(ptr(), pane_index, y) }
 
 #[wasm_bindgen]
-pub fn chart_time_to_coordinate(time: f64) -> f32 { lumen_charts::chart_time_to_coordinate(ptr(), time as i64) }
+pub fn chart_time_to_coordinate(time: f64) -> f32 { lumen_charts_core::chart_time_to_coordinate(ptr(), time as i64) }
 
 // === ITimeScaleApi ===
 
 #[wasm_bindgen]
-pub fn chart_time_scale_scroll_to_position(pos: f32) { lumen_charts::chart_time_scale_scroll_to_position(ptr(), pos); }
+pub fn chart_time_scale_scroll_to_position(pos: f32) { lumen_charts_core::chart_time_scale_scroll_to_position(ptr(), pos); }
 
 #[wasm_bindgen]
-pub fn chart_time_scale_scroll_to_real_time() { lumen_charts::chart_time_scale_scroll_to_real_time(ptr()); }
+pub fn chart_time_scale_scroll_to_real_time() { lumen_charts_core::chart_time_scale_scroll_to_real_time(ptr()); }
 
 #[wasm_bindgen]
-pub fn chart_time_scale_reset() { lumen_charts::chart_time_scale_reset(ptr()); }
+pub fn chart_time_scale_reset() { lumen_charts_core::chart_time_scale_reset(ptr()); }
 
 #[wasm_bindgen]
-pub fn chart_time_scale_width() -> f32 { lumen_charts::chart_time_scale_width(ptr()) }
+pub fn chart_time_scale_width() -> f32 { lumen_charts_core::chart_time_scale_width(ptr()) }
 
 #[wasm_bindgen]
-pub fn chart_time_scale_height() -> f32 { lumen_charts::chart_time_scale_height(ptr()) }
+pub fn chart_time_scale_height() -> f32 { lumen_charts_core::chart_time_scale_height(ptr()) }
 
 // === IPriceScaleApi ===
 
 #[wasm_bindgen]
-pub fn chart_price_scale_get_mode() -> u32 { lumen_charts::chart_price_scale_get_mode(ptr(), 0) as u32 }
+pub fn chart_price_scale_get_mode() -> u32 { lumen_charts_core::chart_price_scale_get_mode(ptr(), 0) as u32 }
 
 #[wasm_bindgen]
-pub fn chart_price_scale_set_mode(mode: u32) { lumen_charts::chart_price_scale_set_mode(ptr(), 0, mode as u8); }
+pub fn chart_price_scale_set_mode(mode: u32) { lumen_charts_core::chart_price_scale_set_mode(ptr(), 0, mode as u8); }
 
 // === Resize ===
 
 #[wasm_bindgen]
 pub fn chart_resize(width: u32, height: u32, scale_factor: f64) {
-    lumen_charts::chart_resize(ptr(), width, height, scale_factor);
+    lumen_charts_core::chart_resize(ptr(), width, height, scale_factor);
 }
 
 // === Sample data generator ===
 
-fn generate_sample_bars() -> Vec<lumen_charts::chart_model::OhlcBar> {
+fn generate_sample_bars() -> Vec<lumen_charts_core::chart_model::OhlcBar> {
     let mut bars = Vec::with_capacity(100);
     let base_time: i64 = 1704153600;
     let day: i64 = 86400;
@@ -448,7 +448,7 @@ fn generate_sample_bars() -> Vec<lumen_charts::chart_model::OhlcBar> {
         let high = open.max(close) + daily_range * r3.abs();
         let low = open.min(close) - daily_range * r2.abs();
 
-        bars.push(lumen_charts::chart_model::OhlcBar {
+        bars.push(lumen_charts_core::chart_model::OhlcBar {
             time: base_time + i * day,
             open,
             high: high.max(open.max(close)),

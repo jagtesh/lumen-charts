@@ -1,6 +1,6 @@
 /// Parity tests from LWC: tests/unittests/data-layer.spec.ts
-use lumen_charts::chart_model::OhlcBar;
-use lumen_charts::data_layer::DataLayer;
+use lumen_charts_core::chart_model::OhlcBar;
+use lumen_charts_core::data_layer::DataLayer;
 
 fn bar_at(time: i64) -> OhlcBar {
     OhlcBar {

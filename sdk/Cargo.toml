@@ -6,5 +6,5 @@ description = "Safe, idiomatic Rust SDK for Lumen Charts (v5 API compatible)"
 publish = false
 
 [dependencies]
-lumen-charts = { path = "../../core" }
+lumen-charts-core = { path = "../core" }
 serde_json = "1"

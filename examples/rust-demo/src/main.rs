@@ -12,9 +12,9 @@
 //!   O    Toggle overlay
 //!   M    Toggle MACD
 
-use lumen_charts::renderers::VelloRenderer;
-use lumen_charts::sample_data::sample_data;
-use lumen_charts_sdk::{
+use lumen_charts::core::renderers::VelloRenderer;
+use lumen_charts::core::sample_data::sample_data;
+use lumen_charts::sdk::{
     ChartApi, Color, HistogramDataPoint, LineDataPoint, OhlcBar, PaneApi, SeriesApi,
     SeriesDefinition,
 };
@@ -298,8 +298,8 @@ impl AppState {
 
         // --- Render chart via Vello (invalidation-aware caching) ---
         {
-            use lumen_charts::backends::VelloBackend;
-            use lumen_charts::chart_renderer::{render_bottom_scene, render_crosshair_scene};
+            use lumen_charts::core::backends::VelloBackend;
+            use lumen_charts::core::chart_renderer::{render_bottom_scene, render_crosshair_scene};
 
             pipeline.backend.reset();
 

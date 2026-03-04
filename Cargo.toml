@@ -1,0 +1,21 @@
+[workspace]
+members = ["core", "sdk", "sdks/wasm", "examples/rust-demo"]
+resolver = "2"
+
+[package]
+name = "lumen-charts"
+version = "1.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Jagtesh Chadha"]
+description = "GPU-accelerated charting library inspired by Lightweight Charts, built on Vello + wgpu"
+repository = "https://github.com/jagtesh/lumen-charts"
+homepage = "https://github.com/jagtesh/lumen-charts"
+readme = "README.md"
+keywords = ["chart", "gpu", "vello", "wgpu", "trading"]
+categories = ["graphics", "rendering", "visualization"]
+rust-version = "1.75"
+
+[dependencies]
+lumen-charts-core = { path = "core" }
+lumen-charts-sdk = { path = "sdk" }

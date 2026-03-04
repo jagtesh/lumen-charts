@@ -1,7 +1,7 @@
-use lumen_charts::chart_model::OhlcBar;
+use lumen_charts_core::chart_model::OhlcBar;
 /// Parity tests from LWC: tests/unittests/get-series-data-creator.spec.ts
 ///                    and: tests/unittests/get-series-plot-row-creator.spec.ts
-use lumen_charts::series::{Series, SeriesCollection, SeriesData, SeriesType};
+use lumen_charts_core::series::{Series, SeriesCollection, SeriesData, SeriesType};
 
 fn sample_ohlc() -> Vec<OhlcBar> {
     vec![

@@ -5,8 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-lumen-charts = { path = "../../core" }
-lumen-charts-sdk = { path = "../../sdks/rust" }
+lumen-charts = { path = "../.." }
 vello = "0.4"
 winit = "0.30"
 wgpu = "23"

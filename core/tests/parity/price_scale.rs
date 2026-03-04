@@ -1,6 +1,6 @@
 /// Parity tests from LWC: tests/unittests/price-scale.spec.ts
-use lumen_charts::chart_model::{OhlcBar, Rect};
-use lumen_charts::price_scale::{PriceScale, PriceScaleMode};
+use lumen_charts_core::chart_model::{OhlcBar, Rect};
+use lumen_charts_core::price_scale::{PriceScale, PriceScaleMode};
 
 fn plot_rect() -> Rect {
     Rect {

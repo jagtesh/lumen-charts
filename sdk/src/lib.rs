@@ -9,7 +9,7 @@
 //!
 //! Unlike the Swift and JS SDKs (which go through the C-ABI), this SDK accesses
 //! `Chart.state` directly — Rust-to-Rust, no FFI overhead, full type safety.
-//! The C-ABI functions in `lumen_charts::lib` exist for foreign consumers; Rust
+//! The C-ABI functions in `lumen_charts_core::lib` exist for foreign consumers; Rust
 //! consumers should use this SDK instead.
 //!
 //! # Example
@@ -25,16 +25,16 @@
 //! ```
 
 // Re-export core types consumers will need
-pub use lumen_charts::chart_model::OhlcBar;
-pub use lumen_charts::color::{Color, ColorName};
-pub use lumen_charts::renderers::Renderer;
-pub use lumen_charts::series::{
+pub use lumen_charts_core::chart_model::OhlcBar;
+pub use lumen_charts_core::color::{Color, ColorName};
+pub use lumen_charts_core::renderers::Renderer;
+pub use lumen_charts_core::series::{
     AreaSeriesOptions, BaselineSeriesOptions, CandlestickOptions, HistogramDataPoint,
     HistogramSeriesOptions, LineDataPoint, LineSeriesOptions, PriceLineOptions, SeriesType,
 };
-pub use lumen_charts::Chart;
+pub use lumen_charts_core::Chart;
 
-use lumen_charts::series::Series;
+use lumen_charts_core::series::Series;
 use std::ffi::CString;
 
 // ---------------------------------------------------------------------------
@@ -209,13 +209,13 @@ impl SeriesApi {
     /// Get the current series options as a JSON string.
     pub fn options(&self, chart: &ChartApi) -> Option<String> {
         let ptr = unsafe {
-            lumen_charts::chart_series_get_options(&chart.inner as *const Chart, self.id)
+            lumen_charts_core::chart_series_get_options(&chart.inner as *const Chart, self.id)
         };
         if ptr.is_null() {
             return None;
         }
         let s = unsafe { std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned() };
-        unsafe { lumen_charts::chart_free_string(ptr) };
+        unsafe { lumen_charts_core::chart_free_string(ptr) };
         Some(s)
     }
 
@@ -278,7 +278,7 @@ impl SeriesApi {
     pub fn set_series_order(&self, chart: &mut ChartApi, order: u32) -> bool {
         // Delegate to the C-ABI function which handles the reordering logic
         let ok = unsafe {
-            lumen_charts::chart_series_set_order(&mut chart.inner as *mut Chart, self.id, order)
+            lumen_charts_core::chart_series_set_order(&mut chart.inner as *mut Chart, self.id, order)
         };
         if ok {
             chart.invalidate();
@@ -318,7 +318,7 @@ impl SeriesApi {
     pub fn set_markers(&self, chart: &mut ChartApi, markers_json: &str) -> bool {
         if let Ok(c_str) = CString::new(markers_json) {
             let ok = unsafe {
-                lumen_charts::chart_series_set_markers(
+                lumen_charts_core::chart_series_set_markers(
                     &mut chart.inner as *mut Chart,
                     self.id,
                     c_str.as_ptr(),
@@ -336,19 +336,19 @@ impl SeriesApi {
     /// Get markers as a JSON string.
     pub fn markers(&self, chart: &ChartApi) -> Option<String> {
         let ptr =
-            unsafe { lumen_charts::chart_series_markers(&chart.inner as *const Chart, self.id) };
+            unsafe { lumen_charts_core::chart_series_markers(&chart.inner as *const Chart, self.id) };
         if ptr.is_null() {
             return None;
         }
         let s = unsafe { std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned() };
-        unsafe { lumen_charts::chart_free_string(ptr) };
+        unsafe { lumen_charts_core::chart_free_string(ptr) };
         Some(s)
     }
 
     /// Number of bars in a logical index range.
     pub fn bars_in_logical_range(&self, chart: &ChartApi, from: f32, to: f32) -> u32 {
         unsafe {
-            lumen_charts::chart_series_bars_in_logical_range(
+            lumen_charts_core::chart_series_bars_in_logical_range(
                 &chart.inner as *const Chart,
                 self.id,
                 from,
@@ -371,7 +371,7 @@ impl<'a> TimeScaleApi<'a> {
     /// Scroll to a specific bar position (fractional index from the right).
     pub fn scroll_to_position(&mut self, position: f32) {
         unsafe {
-            lumen_charts::chart_time_scale_scroll_to_position(
+            lumen_charts_core::chart_time_scale_scroll_to_position(
                 &mut self.chart.inner as *mut Chart,
                 position,
             );
@@ -382,7 +382,7 @@ impl<'a> TimeScaleApi<'a> {
     /// Scroll so the last bar is visible (right edge).
     pub fn scroll_to_real_time(&mut self) {
         unsafe {
-            lumen_charts::chart_time_scale_scroll_to_real_time(&mut self.chart.inner as *mut Chart);
+            lumen_charts_core::chart_time_scale_scroll_to_real_time(&mut self.chart.inner as *mut Chart);
         }
         self.chart.invalidate();
     }
@@ -392,7 +392,7 @@ impl<'a> TimeScaleApi<'a> {
         let mut start = 0i64;
         let mut end = 0i64;
         let ok = unsafe {
-            lumen_charts::chart_time_scale_get_visible_range(
+            lumen_charts_core::chart_time_scale_get_visible_range(
                 &self.chart.inner as *const Chart,
                 &mut start,
                 &mut end,
@@ -408,7 +408,7 @@ impl<'a> TimeScaleApi<'a> {
     /// Set the visible time range by start/end timestamps.
     pub fn set_visible_range(&mut self, start: i64, end: i64) {
         unsafe {
-            lumen_charts::chart_time_scale_set_visible_range(
+            lumen_charts_core::chart_time_scale_set_visible_range(
                 &mut self.chart.inner as *mut Chart,
                 start,
                 end,
@@ -422,7 +422,7 @@ impl<'a> TimeScaleApi<'a> {
         let mut first = 0f64;
         let mut last = 0f64;
         let ok = unsafe {
-            lumen_charts::chart_time_scale_get_visible_logical_range(
+            lumen_charts_core::chart_time_scale_get_visible_logical_range(
                 &self.chart.inner as *const Chart,
                 &mut first,
                 &mut last,
@@ -438,7 +438,7 @@ impl<'a> TimeScaleApi<'a> {
     /// Set the visible logical range by bar indices.
     pub fn set_visible_logical_range(&mut self, first: f64, last: f64) {
         unsafe {
-            lumen_charts::chart_time_scale_set_visible_logical_range(
+            lumen_charts_core::chart_time_scale_set_visible_logical_range(
                 &mut self.chart.inner as *mut Chart,
                 first,
                 last,
@@ -450,26 +450,26 @@ impl<'a> TimeScaleApi<'a> {
     /// Reset time scale to default (fit content).
     pub fn reset(&mut self) {
         unsafe {
-            lumen_charts::chart_time_scale_reset(&mut self.chart.inner as *mut Chart);
+            lumen_charts_core::chart_time_scale_reset(&mut self.chart.inner as *mut Chart);
         }
         self.chart.invalidate();
     }
 
     /// Get the time scale width in logical pixels.
     pub fn width(&self) -> f32 {
-        unsafe { lumen_charts::chart_time_scale_width(&self.chart.inner as *const Chart) }
+        unsafe { lumen_charts_core::chart_time_scale_width(&self.chart.inner as *const Chart) }
     }
 
     /// Get the time scale height in logical pixels.
     pub fn height(&self) -> f32 {
-        unsafe { lumen_charts::chart_time_scale_height(&self.chart.inner as *const Chart) }
+        unsafe { lumen_charts_core::chart_time_scale_height(&self.chart.inner as *const Chart) }
     }
 
     /// Apply options via JSON.
     pub fn apply_options(&mut self, json: &str) -> bool {
         if let Ok(c_str) = CString::new(json) {
             let ok = unsafe {
-                lumen_charts::chart_time_scale_apply_options(
+                lumen_charts_core::chart_time_scale_apply_options(
                     &mut self.chart.inner as *mut Chart,
                     c_str.as_ptr(),
                 )
@@ -498,7 +498,7 @@ impl<'a> PriceScaleApi<'a> {
     /// Get the price scale mode: 0 = Normal, 1 = Logarithmic.
     pub fn mode(&self) -> u8 {
         unsafe {
-            lumen_charts::chart_price_scale_get_mode(
+            lumen_charts_core::chart_price_scale_get_mode(
                 &self.chart.inner as *const Chart,
                 self.pane_index,
             )
@@ -508,7 +508,7 @@ impl<'a> PriceScaleApi<'a> {
     /// Set the price scale mode: 0 = Normal, 1 = Logarithmic.
     pub fn set_mode(&mut self, mode: u8) {
         unsafe {
-            lumen_charts::chart_price_scale_set_mode(
+            lumen_charts_core::chart_price_scale_set_mode(
                 &mut self.chart.inner as *mut Chart,
                 self.pane_index,
                 mode,
@@ -522,7 +522,7 @@ impl<'a> PriceScaleApi<'a> {
         let mut min = 0f64;
         let mut max = 0f64;
         let ok = unsafe {
-            lumen_charts::chart_price_scale_get_range(
+            lumen_charts_core::chart_price_scale_get_range(
                 &self.chart.inner as *const Chart,
                 self.pane_index,
                 &mut min,
@@ -538,14 +538,14 @@ impl<'a> PriceScaleApi<'a> {
 
     /// Get the price scale width in pixels.
     pub fn width(&self) -> f32 {
-        unsafe { lumen_charts::chart_price_scale_width(&self.chart.inner as *const Chart, 0) }
+        unsafe { lumen_charts_core::chart_price_scale_width(&self.chart.inner as *const Chart, 0) }
     }
 
     /// Apply options via JSON.
     pub fn apply_options(&mut self, json: &str) -> bool {
         if let Ok(c_str) = CString::new(json) {
             let ok = unsafe {
-                lumen_charts::chart_price_scale_apply_options(
+                lumen_charts_core::chart_price_scale_apply_options(
                     &mut self.chart.inner as *mut Chart,
                     c_str.as_ptr(),
                 )
@@ -564,7 +564,7 @@ impl<'a> PriceScaleApi<'a> {
 // v5: ChartApi — the main entry point
 // ---------------------------------------------------------------------------
 
-/// Safe, idiomatic wrapper around `lumen_charts::Chart`.
+/// Safe, idiomatic wrapper around `lumen_charts_core::Chart`.
 ///
 /// Provides the v5 `IChartApi` interface: unified `add_series`, pane management,
 /// event subscriptions, coordinate translation, and sub-API accessors.
@@ -611,7 +611,7 @@ impl ChartApi {
         self.inner
             .state
             .pending_mask
-            .set_global(lumen_charts::invalidation::InvalidationLevel::Full);
+            .set_global(lumen_charts_core::invalidation::InvalidationLevel::Full);
     }
 
     // -- Viewport --
@@ -655,13 +655,13 @@ impl ChartApi {
 
     /// Handle a zoom event (e.g. scroll-wheel zoom). Returns true if a redraw is needed.
     pub fn zoom(&mut self, factor: f32, center_x: f32) -> bool {
-        unsafe { lumen_charts::chart_zoom(&mut self.inner as *mut Chart, factor, center_x) }
+        unsafe { lumen_charts_core::chart_zoom(&mut self.inner as *mut Chart, factor, center_x) }
     }
 
     /// Handle a pinch-to-zoom gesture. Returns true if a redraw is needed.
     pub fn pinch(&mut self, scale: f32, center_x: f32, center_y: f32) -> bool {
         unsafe {
-            lumen_charts::chart_pinch(&mut self.inner as *mut Chart, scale, center_x, center_y)
+            lumen_charts_core::chart_pinch(&mut self.inner as *mut Chart, scale, center_x, center_y)
         }
     }
 
@@ -751,7 +751,7 @@ impl ChartApi {
     pub fn apply_options(&mut self, json: &str) -> bool {
         if let Ok(c_str) = CString::new(json) {
             let ok = unsafe {
-                lumen_charts::chart_apply_options(&mut self.inner as *mut Chart, c_str.as_ptr())
+                lumen_charts_core::chart_apply_options(&mut self.inner as *mut Chart, c_str.as_ptr())
             };
             if ok {
                 self.invalidate();
@@ -764,12 +764,12 @@ impl ChartApi {
 
     /// Get current chart options as a JSON string.
     pub fn options(&self) -> Option<String> {
-        let ptr = unsafe { lumen_charts::chart_get_options(&self.inner as *const Chart) };
+        let ptr = unsafe { lumen_charts_core::chart_get_options(&self.inner as *const Chart) };
         if ptr.is_null() {
             return None;
         }
         let s = unsafe { std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned() };
-        unsafe { lumen_charts::chart_free_string(ptr) };
+        unsafe { lumen_charts_core::chart_free_string(ptr) };
         Some(s)
     }
 
@@ -791,7 +791,7 @@ impl ChartApi {
     /// Convert a logical index to an X pixel coordinate.
     pub fn logical_to_coordinate(&self, logical: f64) -> f32 {
         unsafe {
-            lumen_charts::chart_logical_to_coordinate(
+            lumen_charts_core::chart_logical_to_coordinate(
                 &self.inner as *const Chart as *mut Chart,
                 logical,
             )
@@ -801,7 +801,7 @@ impl ChartApi {
     /// Convert an X pixel coordinate to a logical index.
     pub fn coordinate_to_logical(&self, x: f32) -> f64 {
         unsafe {
-            lumen_charts::chart_coordinate_to_logical(&self.inner as *const Chart as *mut Chart, x)
+            lumen_charts_core::chart_coordinate_to_logical(&self.inner as *const Chart as *mut Chart, x)
         }
     }
 
@@ -825,7 +825,7 @@ impl ChartApi {
     /// Programmatically set the crosshair position.
     pub fn set_crosshair_position(&mut self, price: f64, time: i64, series: &SeriesApi) -> bool {
         unsafe {
-            lumen_charts::chart_set_crosshair_position(
+            lumen_charts_core::chart_set_crosshair_position(
                 &mut self.inner as *mut Chart,
                 price,
                 time,
@@ -836,31 +836,31 @@ impl ChartApi {
 
     /// Clear the crosshair position.
     pub fn clear_crosshair_position(&mut self) -> bool {
-        unsafe { lumen_charts::chart_clear_crosshair_position(&mut self.inner as *mut Chart) }
+        unsafe { lumen_charts_core::chart_clear_crosshair_position(&mut self.inner as *mut Chart) }
     }
 
     // -- Formatting helpers --
 
     /// Format a price using the chart's localization settings.
     pub fn format_price(&self, price: f64) -> String {
-        let ptr = unsafe { lumen_charts::chart_format_price(&self.inner as *const Chart, price) };
+        let ptr = unsafe { lumen_charts_core::chart_format_price(&self.inner as *const Chart, price) };
         if ptr.is_null() {
             return format!("{:.2}", price);
         }
         let s = unsafe { std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned() };
-        unsafe { lumen_charts::chart_free_string(ptr) };
+        unsafe { lumen_charts_core::chart_free_string(ptr) };
         s
     }
 
     /// Format a timestamp as a date string.
     pub fn format_date(&self, timestamp: i64) -> String {
         let ptr =
-            unsafe { lumen_charts::chart_format_date(&self.inner as *const Chart, timestamp) };
+            unsafe { lumen_charts_core::chart_format_date(&self.inner as *const Chart, timestamp) };
         if ptr.is_null() {
             return String::new();
         }
         let s = unsafe { std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned() };
-        unsafe { lumen_charts::chart_free_string(ptr) };
+        unsafe { lumen_charts_core::chart_free_string(ptr) };
         s
     }
 

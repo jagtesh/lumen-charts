@@ -1,8 +1,8 @@
 /// Parity tests from LWC: tests/unittests/default-tick-mark-formatter.spec.ts
 ///
 /// Tests for time axis tick mark formatting at different granularities.
-/// Uses lumen_charts::formatters for all formatting.
-use lumen_charts::formatters;
+/// Uses lumen_charts_core::formatters for all formatting.
+use lumen_charts_core::formatters;
 
 /// LWC: correct format year — '2019', '2020'
 /// File: default-tick-mark-formatter.spec.ts, line 15

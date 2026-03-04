@@ -19,7 +19,7 @@ WASM_SDK       := sdks/wasm
 WEBGPU_DEMO    := examples/webgpu-demo
 RUST_DEMO      := examples/rust-demo
 CANVAS_DEMO    := examples/web-canvas-demo
-LIB_PATH       := $(CORE_DIR)/target/release
+LIB_PATH       := target/release
 HEADER_SRC     := $(CORE_DIR)/include/chart_core.h
 HEADER_DST     := $(SWIFT_SDK)/Sources/CChartCore/chart_core.h
 
@@ -35,7 +35,7 @@ sdks: swift-sdk wasm-sdk
 
 .PHONY: core-libs
 core-libs:
-	cd $(CORE_DIR) && cargo build --release
+	cargo build --release -p lumen-charts-core
 
 # ── Header sync ──────────────────────────────────────────────
 
@@ -77,10 +77,10 @@ rust-demo:
 
 .PHONY: test
 test:
-	cd $(CORE_DIR) && cargo test
+	cargo test --workspace --exclude chart-wasm
 
 .PHONY: clean
 clean:
-	cd $(CORE_DIR) && cargo clean
+	cargo clean
 	rm -rf $(SWIFT_DEMO)/.build
 	rm -rf $(WASM_SDK)/pkg

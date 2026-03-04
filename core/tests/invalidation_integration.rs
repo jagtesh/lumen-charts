@@ -6,12 +6,12 @@
 //! - Mask coalescing (multiple interactions merge correctly)
 //! - Render counter accuracy
 
-use lumen_charts::backends::VelloBackend;
-use lumen_charts::chart_model::{ChartData, OhlcBar};
-use lumen_charts::chart_renderer::{render_bottom_scene, render_crosshair_scene};
-use lumen_charts::chart_state::ChartState;
-use lumen_charts::invalidation::InvalidationLevel;
-use lumen_charts::sample_data::sample_data;
+use lumen_charts_core::backends::VelloBackend;
+use lumen_charts_core::chart_model::{ChartData, OhlcBar};
+use lumen_charts_core::chart_renderer::{render_bottom_scene, render_crosshair_scene};
+use lumen_charts_core::chart_state::ChartState;
+use lumen_charts_core::invalidation::InvalidationLevel;
+use lumen_charts_core::sample_data::sample_data;
 
 fn make_state() -> ChartState {
     let data = ChartData {
@@ -335,7 +335,7 @@ fn test_full_lifecycle() {
     // Phase 7: Add series → Full
     state
         .series
-        .add(lumen_charts::series::Series::line(0, vec![]));
+        .add(lumen_charts_core::series::Series::line(0, vec![]));
     state.pending_mask.set_global(InvalidationLevel::Full);
     let level = simulate_render(&mut state);
     assert_eq!(level, InvalidationLevel::Full);
@@ -348,7 +348,7 @@ fn test_keyboard_scroll_invalidation_cycle() {
     simulate_render(&mut state); // initial
 
     // Arrow key → Light → render → idle
-    state.key_down(lumen_charts::chart_state::ChartKey::ArrowRight);
+    state.key_down(lumen_charts_core::chart_state::ChartKey::ArrowRight);
     let level = simulate_render(&mut state);
     assert_eq!(level, InvalidationLevel::Light);
 

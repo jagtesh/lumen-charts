@@ -1,8 +1,8 @@
 /// Parity tests from LWC: tests/unittests/formatters.spec.ts
 ///
 /// Price, percentage, volume formatters pass now.
-/// Date/datetime/time formatters now use lumen_charts::formatters.
-use lumen_charts::formatters;
+/// Date/datetime/time formatters now use lumen_charts_core::formatters.
+use lumen_charts_core::formatters;
 
 /// LWC: price-formatter default — PriceFormatter().format(1.5) === '1.50'
 /// File: formatters.spec.ts, line 38

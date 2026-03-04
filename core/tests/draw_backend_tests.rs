@@ -6,8 +6,8 @@
 //! - set_scale(sx, sy) non-uniform scaling
 //! - DrawBackend trait method coverage on VelloBackend
 
-use lumen_charts::backends::VelloBackend;
-use lumen_charts::draw_backend::{snap, snap_x, snap_y, Color, DrawBackend};
+use lumen_charts_core::backends::VelloBackend;
+use lumen_charts_core::draw_backend::{snap, snap_x, snap_y, Color, DrawBackend};
 
 // =============================================================================
 // Pixel-snap helper tests
