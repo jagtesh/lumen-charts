@@ -2756,4 +2756,73 @@ mod tests {
         assert_eq!(state.time_points.len(), 2);
         assert_eq!(state.time_index_map.len(), 2);
     }
+
+    #[test]
+    fn test_multi_resolution_panes_share_unified_time_axis() {
+        // Scenario: 5-min main chart (10:20, 10:25) + 1-min series in pane 1
+        // Timestamps: 620=10:20, 621=10:21, ..., 625=10:25 (minutes as i64)
+        let bars = vec![make_bar(620, 100.0), make_bar(625, 105.0)];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 600.0, 1.0);
+        state.add_pane(1.0);
+
+        // Add 1-min resolution series to pane 1
+        let mut series = crate::series::Series::line(
+            0,
+            vec![
+                crate::series::LineDataPoint {
+                    time: 620,
+                    value: 10.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 621,
+                    value: 11.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 622,
+                    value: 12.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 623,
+                    value: 13.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 624,
+                    value: 14.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 625,
+                    value: 15.0,
+                },
+            ],
+        );
+        series.pane_index = 1;
+        state.add_series(series);
+
+        // CHEAP O(1) CHECK: unified timeline length = union of all unique timestamps
+        // 5-min bars contribute {620, 625}, 1-min series contributes {620..625}
+        // Union = {620, 621, 622, 623, 624, 625} = 6 points
+        assert_eq!(state.time_points.len(), 6);
+        assert_eq!(state.time_scale.bar_count, 6);
+
+        // Both panes produce identical x-coordinates for shared timestamps
+        // because there is architecturally ONE time_scale (O(1) spot check)
+        let x_620_p0 = state.time_scale.index_to_x(
+            *state.time_index_map.get(&620).unwrap(),
+            &state.panes[0].layout_rect,
+        );
+        let x_620_p1 = state.time_scale.index_to_x(
+            *state.time_index_map.get(&620).unwrap(),
+            &state.panes[1].layout_rect,
+        );
+        assert!(
+            (x_620_p0 - x_620_p1).abs() < 0.01,
+            "panes must share x-axis: pane0={}, pane1={}",
+            x_620_p0,
+            x_620_p1
+        );
+
+        // Pane 0's 5-min bar at time 625 sits at unified index 5, not index 1
+        assert_eq!(*state.time_index_map.get(&625).unwrap(), 5);
+    }
 }
