@@ -111,6 +111,9 @@ git clone https://github.com/jagtesh/lumen-charts.git
 cd lumen-charts
 ```
 
+Release workflow (version bump order, publish order, and breaking-change policy):
+[RELEASING.md](RELEASING.md)
+
 ### Build the Core Library
 
 ```bash

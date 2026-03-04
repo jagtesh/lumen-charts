@@ -1,5 +1,6 @@
 [workspace]
 members = ["core", "rust-sdk", "sdks/wasm", "examples/rust-demo"]
+default-members = [".", "core", "rust-sdk", "examples/rust-demo"]
 resolver = "2"
 
 [package]
@@ -16,7 +17,16 @@ keywords = ["chart", "gpu", "vello", "wgpu", "trading"]
 categories = ["graphics", "rendering", "visualization"]
 rust-version = "1.75"
 
+[features]
+default = []
+femtovg-backend = [
+    "lumen-charts-core/femtovg-backend",
+    "lumen-charts-sdk/femtovg-backend",
+]
+
 [dependencies]
 lumen-charts-core = { path = "core", version = "2.0.0" }
 lumen-charts-sdk = { path = "rust-sdk", version = "1.0.0" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
 lumen-charts-wasm = { path = "sdks/wasm", version = "1.0.0" }

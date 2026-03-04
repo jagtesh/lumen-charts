@@ -10,6 +10,10 @@ repository = "https://github.com/jagtesh/lumen-charts"
 homepage = "https://github.com/jagtesh/lumen-charts"
 publish = true
 
+[features]
+default = []
+femtovg-backend = ["lumen-charts-core/femtovg-backend"]
+
 [dependencies]
-lumen-charts-core = "2.0.0"
+lumen-charts-core = { path = "../core", version = "2.0.0" }
 serde_json = "1"

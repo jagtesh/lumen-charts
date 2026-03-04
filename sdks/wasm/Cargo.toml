@@ -9,11 +9,16 @@ readme = "README.md"
 repository = "https://github.com/jagtesh/lumen-charts"
 homepage = "https://github.com/jagtesh/lumen-charts"
 publish = true
+
+[features]
+default = []
+femtovg-backend = ["lumen-charts-core/femtovg-backend"]
+
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-lumen-charts-core = "2.0.0"
+lumen-charts-core = { path = "../../core", version = "2.0.0" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
