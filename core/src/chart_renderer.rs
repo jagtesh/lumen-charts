@@ -680,13 +680,17 @@ fn draw_candlestick_bars_data(
     let plot_area = &pane.layout_rect;
     let bar_width = (state.time_scale.bar_spacing * 0.7).max(1.0);
 
-    let (first, last) = state.time_scale.visible_range(plot_area.width);
-    let first = first.saturating_sub(1);
-    let last = (last + 1).min(bars.len());
+    let (vis_first, vis_last) = state.time_scale.visible_range(plot_area.width);
 
-    for i in first..last {
-        let bar = &bars[i];
-        let x = state.time_scale.index_to_x(i, plot_area) as f64;
+    for bar in bars {
+        let bar_idx = match state.time_index_map.get(&bar.time) {
+            Some(&idx) => idx,
+            None => continue,
+        };
+        if bar_idx + 1 < vis_first || bar_idx > vis_last + 1 {
+            continue;
+        }
+        let x = state.time_scale.index_to_x(bar_idx, plot_area) as f64;
 
         if x < (plot_area.x - bar_width) as f64
             || x > (plot_area.x + plot_area.width + bar_width) as f64
@@ -797,18 +801,19 @@ fn draw_line_series(
     let pane = &state.panes[pane_index];
     let plot_area = &pane.layout_rect;
 
-    let (first, last) = state.time_scale.visible_range(plot_area.width);
-    let first = first.saturating_sub(1);
-    let last = (last + 1).min(line_points.len());
+    let (vis_first, vis_last) = state.time_scale.visible_range(plot_area.width);
 
-    if first >= last {
-        return;
-    }
-
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(last - first);
-    for i in first..last {
-        let pt = &line_points[i];
-        let x = state.time_scale.index_to_x(i, plot_area) as f64;
+    let mut points: Vec<(f64, f64)> = Vec::with_capacity(line_points.len());
+    for pt in line_points {
+        let bar_idx = match state.time_index_map.get(&pt.time) {
+            Some(&idx) => idx,
+            None => continue, // data point has no matching bar on the time axis
+        };
+        // Skip points outside the visible range (with 1-bar padding)
+        if bar_idx + 1 < vis_first || bar_idx > vis_last + 1 {
+            continue;
+        }
+        let x = state.time_scale.index_to_x(bar_idx, plot_area) as f64;
         let y = pane.price_scale.price_to_y(pt.value, plot_area) as f64;
         points.push((x, y));
     }
@@ -849,19 +854,19 @@ fn draw_area_series(
     let pane = &state.panes[pane_index];
     let plot_area = &pane.layout_rect;
 
-    let (first, last) = state.time_scale.visible_range(plot_area.width);
-    let first = first.saturating_sub(1);
-    let last = (last + 1).min(line_points.len());
+    let (vis_first, vis_last) = state.time_scale.visible_range(plot_area.width);
 
-    if first >= last {
-        return;
-    }
-
-    // 1. Build line points
-    let mut line_pts: Vec<(f64, f64)> = Vec::with_capacity(last - first);
-    for i in first..last {
-        let pt = &line_points[i];
-        let x = state.time_scale.index_to_x(i, plot_area) as f64;
+    // 1. Build line points using time_index_map for correct alignment
+    let mut line_pts: Vec<(f64, f64)> = Vec::with_capacity(line_points.len());
+    for pt in line_points {
+        let bar_idx = match state.time_index_map.get(&pt.time) {
+            Some(&idx) => idx,
+            None => continue,
+        };
+        if bar_idx + 1 < vis_first || bar_idx > vis_last + 1 {
+            continue;
+        }
+        let x = state.time_scale.index_to_x(bar_idx, plot_area) as f64;
         let y = pane.price_scale.price_to_y(pt.value, plot_area) as f64;
         line_pts.push((x, y));
     }
@@ -904,21 +909,21 @@ fn draw_baseline_series(
     let pane = &state.panes[pane_index];
     let plot_area = &pane.layout_rect;
 
-    let (first, last) = state.time_scale.visible_range(plot_area.width);
-    let first = first.saturating_sub(1);
-    let last = (last + 1).min(line_points.len());
-
-    if first >= last {
-        return;
-    }
+    let (vis_first, vis_last) = state.time_scale.visible_range(plot_area.width);
 
     let base_y = pane.price_scale.price_to_y(opts.base_value, plot_area) as f64;
 
-    // Build line points
-    let mut line_pts: Vec<(f64, f64)> = Vec::with_capacity(last - first);
-    for i in first..last {
-        let pt = &line_points[i];
-        let x = state.time_scale.index_to_x(i, plot_area) as f64;
+    // Build line points using time_index_map for correct alignment
+    let mut line_pts: Vec<(f64, f64)> = Vec::with_capacity(line_points.len());
+    for pt in line_points {
+        let bar_idx = match state.time_index_map.get(&pt.time) {
+            Some(&idx) => idx,
+            None => continue,
+        };
+        if bar_idx + 1 < vis_first || bar_idx > vis_last + 1 {
+            continue;
+        }
+        let x = state.time_scale.index_to_x(bar_idx, plot_area) as f64;
         let y = pane.price_scale.price_to_y(pt.value, plot_area) as f64;
         line_pts.push((x, y));
     }
@@ -1026,13 +1031,17 @@ fn draw_histogram_series(
 
     let base_y = pane.price_scale.price_to_y(opts.base, plot_area) as f64;
 
-    let (first, last) = state.time_scale.visible_range(plot_area.width);
-    let first = first.saturating_sub(1);
-    let last = (last + 1).min(points.len());
+    let (vis_first, vis_last) = state.time_scale.visible_range(plot_area.width);
 
-    for i in first..last {
-        let pt = &points[i];
-        let x = state.time_scale.index_to_x(i, plot_area) as f64;
+    for pt in points {
+        let bar_idx = match state.time_index_map.get(&pt.time) {
+            Some(&idx) => idx,
+            None => continue,
+        };
+        if bar_idx + 1 < vis_first || bar_idx > vis_last + 1 {
+            continue;
+        }
+        let x = state.time_scale.index_to_x(bar_idx, plot_area) as f64;
         let val_y = pane.price_scale.price_to_y(pt.value, plot_area) as f64;
 
         if x < plot_area.x as f64 || x > (plot_area.x + plot_area.width) as f64 {

@@ -211,6 +211,8 @@ const TOUCH_TAP_THRESHOLD: f32 = 10.0;
 /// Frame threshold for long-press (frames at 60fps, ~500ms)
 const LONG_PRESS_FRAMES: u32 = 30;
 
+use std::collections::HashMap;
+
 /// Full mutable chart state — owns the model+view state
 pub struct ChartState {
     pub data: ChartData,
@@ -255,6 +257,10 @@ pub struct ChartState {
 
     /// Touch gesture state
     pub touch: TouchState,
+
+    /// Global time index map: timestamp → bar index (mirrors LWC v5 _pointDataByTimePoint).
+    /// Used by series renderers to align data points with the shared time axis.
+    pub time_index_map: HashMap<i64, usize>,
 }
 
 impl ChartState {
@@ -299,7 +305,9 @@ impl ChartState {
             crosshair_render_count: 0,
             skipped_render_count: 0,
             touch: TouchState::default(),
+            time_index_map: HashMap::new(),
         };
+        state.rebuild_time_index();
         state.update_panes_layout();
         state
     }
@@ -1057,8 +1065,19 @@ impl ChartState {
         self.data.bars = bars;
         self.data.bars.sort_by_key(|b| b.time);
         self.time_scale = TimeScale::new(self.data.bars.len(), self.layout.plot_area.width);
+        self.rebuild_time_index();
         self.update_price_scale();
         self.pending_mask.set_global(InvalidationLevel::Light);
+    }
+
+    /// Rebuild the time→bar_index map from current bar data.
+    /// Called after data changes to maintain the global time axis.
+    fn rebuild_time_index(&mut self) {
+        self.time_index_map.clear();
+        self.time_index_map.reserve(self.data.bars.len());
+        for (i, bar) in self.data.bars.iter().enumerate() {
+            self.time_index_map.insert(bar.time, i);
+        }
     }
 
     /// Update or append a single bar (by timestamp).
