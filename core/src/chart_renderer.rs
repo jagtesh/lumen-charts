@@ -12,7 +12,6 @@ const LABEL_FONT_SIZE: f64 = 11.0;
 
 // Convenience constants resolved from the palette
 const BG_COLOR: Color = Palette::Background.color();
-const GRID_COLOR: Color = Palette::Grid.color();
 const AXIS_COLOR: Color = Palette::Axis.color();
 const BULL_COLOR: Color = Palette::Bull.color();
 const BEAR_COLOR: Color = Palette::Bear.color();
@@ -180,24 +179,23 @@ fn draw_grid(b: &mut impl DrawBackend, state: &ChartState, time_ticks: &[TickMar
             b.stroke_line(r.x as f64, y, (r.x + r.width) as f64, y, grid_color, 1.0);
         }
 
-        // Pane border
+        // Pane border — extends into the Y-axis gutter area
         let r = &pane.layout_rect;
+        let right_edge = state.layout.width as f64;
+        // Top border
         b.stroke_line(
-            r.x as f64,
-            r.y as f64,
-            (r.x + r.width) as f64,
-            r.y as f64,
-            AXIS_COLOR,
-            1.0,
+            r.x as f64, r.y as f64, right_edge, r.y as f64, AXIS_COLOR, 1.0,
         );
+        // Bottom border
         b.stroke_line(
             r.x as f64,
             (r.y + r.height) as f64,
-            (r.x + r.width) as f64,
+            right_edge,
             (r.y + r.height) as f64,
             AXIS_COLOR,
             1.0,
         );
+        // Left border
         b.stroke_line(
             r.x as f64,
             r.y as f64,
@@ -206,10 +204,11 @@ fn draw_grid(b: &mut impl DrawBackend, state: &ChartState, time_ticks: &[TickMar
             AXIS_COLOR,
             1.0,
         );
+        // Right border (at right edge of Y-axis gutter)
         b.stroke_line(
-            (r.x + r.width) as f64,
+            right_edge,
             r.y as f64,
-            (r.x + r.width) as f64,
+            right_edge,
             (r.y + r.height) as f64,
             AXIS_COLOR,
             1.0,
@@ -349,11 +348,7 @@ fn draw_y_axis(
         for tick in &price_ticks {
             let y = snap_y(tick.coord as f64, sf);
 
-            // Tick mark
-            let tick_x = (layout.plot_area.x + layout.plot_area.width) as f64;
-            b.stroke_line(tick_x, y, tick_x + 4.0, y, AXIS_COLOR, 1.0);
-
-            // Label
+            // Label (no tick dash — cleaner, especially for negative numbers)
             b.draw_text(
                 &format!("{:.2}", tick.value),
                 x_start,
@@ -383,17 +378,7 @@ fn draw_x_axis(
     for tick in time_ticks {
         let x = snap_x(tick.coord as f64, sf);
 
-        // Tick mark
-        b.stroke_line(
-            x,
-            (plot.y + plot.height) as f64,
-            x,
-            (plot.y + plot.height + 4.0) as f64,
-            AXIS_COLOR,
-            1.0,
-        );
-
-        // Center the label under the tick mark
+        // Center the label under the tick mark (no dash — cleaner)
         let label_w = b.measure_text(&tick.label, LABEL_FONT_SIZE);
         b.draw_text(
             &tick.label,

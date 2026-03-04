@@ -8,8 +8,8 @@ use vello_encoding::Glyph;
 use skrifa::instance::{LocationRef, Size};
 use skrifa::MetadataProvider;
 
-/// Embedded Roboto Mono font data (variable weight, Apache 2.0 license)
-static FONT_DATA: &[u8] = include_bytes!("../fonts/RobotoMono.ttf");
+/// Embedded Inter font data (proportional sans-serif, SIL Open Font License)
+static FONT_DATA: &[u8] = include_bytes!("../fonts/Inter.ttf");
 
 /// Get the embedded chart font (for passing to Vello draw_glyphs)
 pub fn chart_font() -> Font {
