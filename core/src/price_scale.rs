@@ -13,6 +13,8 @@ pub struct PriceScale {
     pub min_price: f64,
     pub max_price: f64,
     pub mode: PriceScaleMode,
+    /// When true (default), auto-fit to visible data. When false, Y-axis range is locked.
+    pub auto_scale: bool,
 }
 
 impl PriceScale {
@@ -23,6 +25,7 @@ impl PriceScale {
                 min_price: 0.0,
                 max_price: 100.0,
                 mode: PriceScaleMode::Normal,
+                auto_scale: true,
             };
         }
         let min = bars.iter().map(|b| b.low).fold(f64::INFINITY, f64::min);
@@ -36,6 +39,7 @@ impl PriceScale {
             min_price: min - margin,
             max_price: max + margin,
             mode: PriceScaleMode::Normal,
+            auto_scale: true,
         }
     }
 

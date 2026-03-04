@@ -2330,6 +2330,47 @@ pub extern "C" fn chart_price_scale_set_mode(chart: *mut Chart, pane_index: u32,
     }
 }
 
+/// Get whether auto-scale is enabled for a pane's price scale.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_price_scale_get_auto_scale(chart: *const Chart, pane_index: u32) -> bool {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &*chart
+    };
+    chart
+        .state
+        .panes
+        .get(pane_index as usize)
+        .map(|p| p.price_scale.auto_scale)
+        .unwrap_or(true)
+}
+
+/// Set whether auto-scale is enabled for a pane's price scale.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_price_scale_set_auto_scale(
+    chart: *mut Chart,
+    pane_index: u32,
+    enabled: bool,
+) -> bool {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+    if let Some(pane) = chart.state.panes.get_mut(pane_index as usize) {
+        pane.price_scale.auto_scale = enabled;
+        if enabled {
+            // Trigger immediate re-fit
+            chart
+                .state
+                .pending_mask
+                .set_global(crate::invalidation::InvalidationLevel::Full);
+        }
+        true
+    } else {
+        false
+    }
+}
+
 /// Get the current visible price range for a pane.
 #[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
 pub extern "C" fn chart_price_scale_get_range(

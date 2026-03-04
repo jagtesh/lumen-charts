@@ -364,6 +364,10 @@ impl ChartState {
 
         // We need to calculate auto-scale bounds for EACH pane based on the series assigned to it
         for (i, pane) in self.panes.iter_mut().enumerate() {
+            // Skip panes where auto-scale is disabled (client locked Y-axis)
+            if !pane.price_scale.auto_scale {
+                continue;
+            }
             // Find all series belonging to this pane
             let mut has_series = false;
             let mut min_val = f64::INFINITY;
@@ -2824,5 +2828,38 @@ mod tests {
 
         // Pane 0's 5-min bar at time 625 sits at unified index 5, not index 1
         assert_eq!(*state.time_index_map.get(&625).unwrap(), 5);
+    }
+
+    #[test]
+    fn test_auto_scale_false_locks_price_range() {
+        let bars = vec![
+            make_bar(100, 50.0),
+            make_bar(200, 60.0),
+            make_bar(300, 70.0),
+        ];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 500.0, 1.0);
+
+        // First auto-fit sets some range
+        state.update_price_scale();
+        let original_min = state.panes[0].price_scale.min_price;
+        let original_max = state.panes[0].price_scale.max_price;
+
+        // Lock the Y-axis
+        state.panes[0].price_scale.auto_scale = false;
+        state.panes[0].price_scale.min_price = 10.0;
+        state.panes[0].price_scale.max_price = 20.0;
+
+        // update_price_scale should NOT change the locked range
+        state.update_price_scale();
+        assert!((state.panes[0].price_scale.min_price - 10.0).abs() < 0.01);
+        assert!((state.panes[0].price_scale.max_price - 20.0).abs() < 0.01);
+
+        // Re-enable auto-scale
+        state.panes[0].price_scale.auto_scale = true;
+        state.update_price_scale();
+        // Should re-fit to data (not the locked 10-20 range)
+        assert!((state.panes[0].price_scale.min_price - original_min).abs() < 0.01);
+        assert!((state.panes[0].price_scale.max_price - original_max).abs() < 0.01);
     }
 }
