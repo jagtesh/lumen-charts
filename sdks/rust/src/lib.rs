@@ -653,6 +653,18 @@ impl ChartApi {
         self.inner.scroll(dx, dy)
     }
 
+    /// Handle a zoom event (e.g. scroll-wheel zoom). Returns true if a redraw is needed.
+    pub fn zoom(&mut self, factor: f32, center_x: f32) -> bool {
+        unsafe { lumen_charts::chart_zoom(&mut self.inner as *mut Chart, factor, center_x) }
+    }
+
+    /// Handle a pinch-to-zoom gesture. Returns true if a redraw is needed.
+    pub fn pinch(&mut self, scale: f32, center_x: f32, center_y: f32) -> bool {
+        unsafe {
+            lumen_charts::chart_pinch(&mut self.inner as *mut Chart, scale, center_x, center_y)
+        }
+    }
+
     /// Handle a keyboard key-down event. Returns true if a redraw is needed.
     pub fn key_down(&mut self, key_code: u32) -> bool {
         self.inner.key_down(key_code)

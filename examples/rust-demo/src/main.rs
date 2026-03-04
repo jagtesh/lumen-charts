@@ -219,6 +219,14 @@ impl AppState {
     }
 
     fn render_egui_and_chart(&mut self) {
+        // --- Collect actions ---
+        // egui closure borrows fields of self, so we can't call &mut self methods
+        // inside it. Instead, collect flags and execute after the closure.
+        let mut action_set_type: Option<usize> = None;
+        let mut action_fit = false;
+        let mut action_overlay = false;
+        let mut action_macd = false;
+
         // --- egui input + UI layout ---
         let raw_input = self.egui_state.take_egui_input(&self.window);
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
@@ -230,16 +238,22 @@ impl AppState {
                             .selectable_label(self.current_series_type == i, *name)
                             .clicked()
                         {
-                            self.current_series_type = i;
+                            action_set_type = Some(i);
                         }
                     }
                     ui.separator();
-                    if ui.button("Fit Content").clicked() {}
+                    if ui.button("Fit Content").clicked() {
+                        action_fit = true;
+                    }
                     if ui
                         .selectable_label(self.overlay_active, "Overlay")
                         .clicked()
-                    {}
-                    if ui.selectable_label(self.macd_active, "MACD").clicked() {}
+                    {
+                        action_overlay = true;
+                    }
+                    if ui.selectable_label(self.macd_active, "MACD").clicked() {
+                        action_macd = true;
+                    }
                     ui.separator();
                     ui.label(format!(
                         "{}  •  {} bars",
@@ -249,6 +263,20 @@ impl AppState {
                 });
             });
         });
+
+        // --- Execute deferred actions ---
+        if let Some(idx) = action_set_type {
+            self.set_series_type(idx);
+        }
+        if action_fit {
+            self.fit_content();
+        }
+        if action_overlay {
+            self.toggle_overlay();
+        }
+        if action_macd {
+            self.toggle_macd();
+        }
 
         self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);
@@ -519,7 +547,28 @@ impl ApplicationHandler for App {
                         MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0),
                         MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
                     };
-                    if state.chart.scroll(-dx, dy) {
+                    // Scroll horizontally to pan, vertically to zoom
+                    // (macOS trackpad convention: vertical scroll = zoom)
+                    let mut redraw = false;
+                    if dx.abs() > 0.1 {
+                        redraw |= state.chart.scroll(-dx, 0.0);
+                    }
+                    if dy.abs() > 0.1 {
+                        let factor = 1.0 - dy * 0.003;
+                        let (cx, _) = state.cursor_pos;
+                        redraw |= state.chart.zoom(factor, cx);
+                    }
+                    if redraw {
+                        state.window.request_redraw();
+                    }
+                }
+            }
+            // Trackpad pinch-to-zoom (macOS)
+            WindowEvent::PinchGesture { delta, .. } => {
+                if !egui_wants_input {
+                    let factor = 1.0 + delta as f32;
+                    let (cx, cy) = state.cursor_pos;
+                    if state.chart.pinch(factor, cx, cy) {
                         state.window.request_redraw();
                     }
                 }
