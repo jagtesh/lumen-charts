@@ -2,7 +2,7 @@
 import CChartCore
 
 /// API for interacting with a chart series.
-/// Returned from `Chart.addLineSeries()`, `Chart.addCandlestickSeries()`, etc.
+/// Returned from `Chart.addSeries()`.
 public class SeriesAPI {
     /// The underlying C-ABI series ID
     public let id: UInt32

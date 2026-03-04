@@ -389,8 +389,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.overlaySeries = nil
                 chart.render()
             } else {
-                // Add area series overlay with data
-                let series = chart.addAreaSeries(data: generateOverlayData())
+                // v5: addSeries + setData
+                let series = chart.addSeries(.area)
+                series.setData(generateOverlayData())
                 self.overlaySeries = series
                 chart.render()
             }
@@ -414,21 +415,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let macd = calculateMACD(bars: generateSampleData())
 
                 // Histogram
-                let histSeries = chart.addHistogramSeries(data: macd.histogram)
+                let histSeries = chart.addSeries(.histogram)
+                histSeries.setData(macd.histogram)
                 histSeries.moveToPane(pane)
 
                 // MACD line (blue)
-                let macdLineSeries = chart.addLineSeries(
-                    data: macd.macdLine,
-                    options: LineSeriesOptions(color: ChartColor(r: 0.2, g: 0.6, b: 1.0), lineWidth: 1.5)
-                )
+                let macdLineSeries = chart.addSeries(.line)
+                macdLineSeries.setData(macd.macdLine)
+                macdLineSeries.applyOptions(LineSeriesOptions(color: ChartColor(r: 0.2, g: 0.6, b: 1.0), lineWidth: 1.5))
                 macdLineSeries.moveToPane(pane)
 
                 // Signal line (orange)
-                let signalSeries = chart.addLineSeries(
-                    data: macd.signalLine,
-                    options: LineSeriesOptions(color: ChartColor(r: 1.0, g: 0.6, b: 0.2), lineWidth: 1.5)
-                )
+                let signalSeries = chart.addSeries(.line)
+                signalSeries.setData(macd.signalLine)
+                signalSeries.applyOptions(LineSeriesOptions(color: ChartColor(r: 1.0, g: 0.6, b: 0.2), lineWidth: 1.5))
                 signalSeries.moveToPane(pane)
 
                 self.macdSeries = [histSeries, macdLineSeries, signalSeries]

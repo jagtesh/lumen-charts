@@ -91,3 +91,27 @@ public enum SeriesType {
     case histogram
     case baseline
 }
+
+/// v5 unified series definition — passed to `chart.addSeries()`.
+///
+/// Replaces per-type `addBarSeries()`, `addLineSeries()`, etc.
+public enum SeriesDefinition {
+    case ohlc
+    case candlestick
+    case line
+    case area
+    case histogram
+    case baseline(baseValue: Double)
+
+    /// Map to the corresponding SeriesType
+    var seriesType: SeriesType {
+        switch self {
+        case .ohlc: return .ohlc
+        case .candlestick: return .candlestick
+        case .line: return .line
+        case .area: return .area
+        case .histogram: return .histogram
+        case .baseline: return .baseline
+        }
+    }
+}

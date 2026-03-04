@@ -40,25 +40,27 @@ class ChartAPI {
     constructor(wasmModule) {
         this.wasm = wasmModule;
     }
-    addOhlcSeries(options) {
-        return new SeriesAPI(this.wasm, this.wasm.chart_add_ohlc_series, options, 'ohlc');
-    }
-    addCandlestickSeries(options) {
-        return new SeriesAPI(this.wasm, this.wasm.chart_add_candlestick_series, options, 'ohlc');
-    }
-    addLineSeries(options) {
-        return new SeriesAPI(this.wasm, this.wasm.chart_add_line_series, options);
-    }
-    addAreaSeries(options) {
-        return new SeriesAPI(this.wasm, this.wasm.chart_add_area_series, options);
-    }
-    addHistogramSeries(options) {
-        return new SeriesAPI(this.wasm, this.wasm.chart_add_histogram_series, options);
-    }
-    addBaselineSeries(options, baseValue) {
-        // Special case for base_value parameter
-        const internalAdd = (data) => this.wasm.chart_add_baseline_series(data, baseValue || 0.0);
-        return new SeriesAPI(this.wasm, internalAdd, options);
+    /**
+     * Add a new series to the chart (v5 unified API).
+     *
+     * @param {string} type - Series type: 'ohlc', 'candlestick', 'line', 'area', 'histogram', 'baseline'
+     * @param {Object} [options] - Series options (e.g. { color, lineWidth, baseValue })
+     * @returns {SeriesAPI}
+     */
+    addSeries(type, options) {
+        const typeMap = {
+            ohlc: { fn: this.wasm.chart_add_ohlc_series, kind: 'ohlc' },
+            candlestick: { fn: this.wasm.chart_add_candlestick_series, kind: 'ohlc' },
+            line: { fn: this.wasm.chart_add_line_series, kind: 'line' },
+            area: { fn: this.wasm.chart_add_area_series, kind: 'line' },
+            histogram: { fn: this.wasm.chart_add_histogram_series, kind: 'line' },
+            baseline: { fn: (data) => this.wasm.chart_add_baseline_series(data, (options && options.baseValue) || 0.0), kind: 'line' },
+        };
+        const entry = typeMap[type];
+        if (!entry) {
+            throw new Error(`chart.addSeries(): unknown type "${type}". Valid: ${Object.keys(typeMap).join(', ')}`);
+        }
+        return new SeriesAPI(this.wasm, entry.fn, options, entry.kind);
     }
 
     /**
@@ -76,7 +78,7 @@ class ChartAPI {
                 throw new TypeError('chart.setData(): each item must have "open", "high", "low", "close" fields');
             }
             if (d.value !== undefined) {
-                console.warn('chart.setData(): "value" field is ignored for primary OHLC data — use addLineSeries().setData() for line data');
+                console.warn('chart.setData(): "value" field is ignored for primary OHLC data — use chart.addSeries(\'line\').setData() for line data');
             }
         }
         const flat = new Float64Array(data.length * 5);

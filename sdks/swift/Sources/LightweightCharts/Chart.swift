@@ -9,7 +9,7 @@ import CChartCore
 /// chart.setData(ohlcBars)
 /// chart.fitContent()
 ///
-/// let line = chart.addLineSeries()
+/// let line = chart.addSeries(.line)
 /// line.setData(linePoints)
 /// ```
 public class Chart {
@@ -88,77 +88,50 @@ public class Chart {
         if chart_set_series_type(ptr, code) { render() }
     }
 
-    // MARK: - Add Series
+    // MARK: - Add Series (v5 unified API)
 
-    /// Add an OHLC bar series
+    /// Add a new series to the chart (v5 unified entry point).
+    ///
+    /// Returns a `SeriesAPI` handle. Set data afterwards via `series.setData()`.
+    ///
+    /// ```swift
+    /// let line = chart.addSeries(.line)
+    /// line.setData(linePoints)
+    ///
+    /// let baseline = chart.addSeries(.baseline(baseValue: 100.0))
+    /// baseline.setData(points)
+    /// ```
     @discardableResult
-    public func addBarSeries(data: [OHLCData] = [], options: BarSeriesOptions = .init()) -> SeriesAPI {
-        var times = data.map { $0.time }
-        var opens = data.map { $0.open }
-        var highs = data.map { $0.high }
-        var lows = data.map { $0.low }
-        var closes = data.map { $0.close }
-        let id = chart_add_ohlc_series(ptr, &times, &opens, &highs, &lows, &closes, UInt32(data.count))
-        let series = SeriesAPI(id: id, seriesType: .ohlc, chartPtr: ptr)
-        liveSeries[id] = series
-        return series
-    }
+    public func addSeries(_ definition: SeriesDefinition) -> SeriesAPI {
+        let emptyTimes: [Int64] = []
+        let emptyF64: [Double] = []
+        let emptyU32: [UInt32] = []
 
-    /// Add a candlestick series
-    @discardableResult
-    public func addCandlestickSeries(data: [OHLCData] = [], options: CandlestickSeriesOptions = .init()) -> SeriesAPI {
-        var times = data.map { $0.time }
-        var opens = data.map { $0.open }
-        var highs = data.map { $0.high }
-        var lows = data.map { $0.low }
-        var closes = data.map { $0.close }
-        let id = chart_add_candlestick_series(ptr, &times, &opens, &highs, &lows, &closes, UInt32(data.count))
-        let series = SeriesAPI(id: id, seriesType: .candlestick, chartPtr: ptr)
-        liveSeries[id] = series
-        return series
-    }
+        var times = emptyTimes
+        var vals = emptyF64
+        var opens = emptyF64
+        var highs = emptyF64
+        var lows = emptyF64
+        var closes = emptyF64
+        var colors = emptyU32
 
-    /// Add a line series
-    @discardableResult
-    public func addLineSeries(data: [LineData] = [], options: LineSeriesOptions = .init()) -> SeriesAPI {
-        var times = data.map { $0.time }
-        var values = data.map { $0.value }
-        let id = chart_add_line_series(ptr, &times, &values, UInt32(data.count))
-        let series = SeriesAPI(id: id, seriesType: .line, chartPtr: ptr)
-        liveSeries[id] = series
-        return series
-    }
+        let id: UInt32
+        switch definition {
+        case .ohlc:
+            id = chart_add_ohlc_series(ptr, &times, &opens, &highs, &lows, &closes, 0)
+        case .candlestick:
+            id = chart_add_candlestick_series(ptr, &times, &opens, &highs, &lows, &closes, 0)
+        case .line:
+            id = chart_add_line_series(ptr, &times, &vals, 0)
+        case .area:
+            id = chart_add_area_series(ptr, &times, &vals, 0)
+        case .histogram:
+            id = chart_add_histogram_series(ptr, &times, &vals, &colors, 0)
+        case .baseline(let baseValue):
+            id = chart_add_baseline_series(ptr, &times, &vals, 0, baseValue)
+        }
 
-    /// Add an area series
-    @discardableResult
-    public func addAreaSeries(data: [LineData] = [], options: AreaSeriesOptions = .init()) -> SeriesAPI {
-        var times = data.map { $0.time }
-        var values = data.map { $0.value }
-        let id = chart_add_area_series(ptr, &times, &values, UInt32(data.count))
-        let series = SeriesAPI(id: id, seriesType: .area, chartPtr: ptr)
-        liveSeries[id] = series
-        return series
-    }
-
-    /// Add a baseline series
-    @discardableResult
-    public func addBaselineSeries(data: [LineData] = [], options: BaselineSeriesOptions = .init()) -> SeriesAPI {
-        var times = data.map { $0.time }
-        var values = data.map { $0.value }
-        let id = chart_add_baseline_series(ptr, &times, &values, UInt32(data.count), options.baseValue)
-        let series = SeriesAPI(id: id, seriesType: .baseline, chartPtr: ptr)
-        liveSeries[id] = series
-        return series
-    }
-
-    /// Add a histogram series
-    @discardableResult
-    public func addHistogramSeries(data: [HistogramData] = [], options: HistogramSeriesOptions = .init()) -> SeriesAPI {
-        var times = data.map { $0.time }
-        var values = data.map { $0.value }
-        var colors = data.map { $0.color?.rgba ?? 0 }
-        let id = chart_add_histogram_series(ptr, &times, &values, &colors, UInt32(data.count))
-        let series = SeriesAPI(id: id, seriesType: .histogram, chartPtr: ptr)
+        let series = SeriesAPI(id: id, seriesType: definition.seriesType, chartPtr: ptr)
         liveSeries[id] = series
         return series
     }

@@ -263,7 +263,7 @@
                     chart.removeSeries(overlaySeries);
                     overlaySeries = null;
                 } else {
-                    overlaySeries = chart.addAreaSeries({
+                    overlaySeries = chart.addSeries('area', {
                         topColor: 'rgba(26, 153, 230, 0.4)',
                         bottomColor: 'rgba(26, 153, 230, 0.0)',
                         lineColor: 'rgba(26, 153, 230, 1.0)',
@@ -283,15 +283,15 @@
                     macdPane = chart.addPane(0.3);
                     const macd = calculateMACD(generateSampleData());
 
-                    const histSeries = chart.addHistogramSeries({});
+                    const histSeries = chart.addSeries('histogram', {});
                     histSeries.moveToPane(macdPane);
                     histSeries.setData(macd.histogram); // Colors skipped for brevity 
 
-                    const macdLineSeries = chart.addLineSeries({ color: 'rgb(51, 153, 255)', lineWidth: 1.5 });
+                    const macdLineSeries = chart.addSeries('line', { color: 'rgb(51, 153, 255)', lineWidth: 1.5 });
                     macdLineSeries.moveToPane(macdPane);
                     macdLineSeries.setData(macd.macdLine);
 
-                    const signalSeries = chart.addLineSeries({ color: 'rgb(255, 153, 51)', lineWidth: 1.5 });
+                    const signalSeries = chart.addSeries('line', { color: 'rgb(255, 153, 51)', lineWidth: 1.5 });
                     signalSeries.moveToPane(macdPane);
                     signalSeries.setData(macd.signalLine);
 
