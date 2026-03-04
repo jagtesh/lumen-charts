@@ -234,6 +234,8 @@ pub struct ChartState {
     y_axis_drag_start_range: Option<(f64, f64)>,
     // X-axis drag state (for time scale zoom)
     x_axis_drag_start_spacing: Option<f32>,
+    /// Which pane is currently being interacted with (set on pointer_down)
+    pub active_pane: usize,
 
     /// Pending events from the last interaction call
     pub pending_events: InteractionEvents,
@@ -289,6 +291,7 @@ impl ChartState {
             click_pending: false,
             y_axis_drag_start_range: None,
             x_axis_drag_start_spacing: None,
+            active_pane: 0,
             pending_events: InteractionEvents::default(),
             pending_mask: InvalidateMask::full(), // first render needs full paint
             // v5: Panes use index-based identity. No ID counter needed.
@@ -575,6 +578,7 @@ impl ChartState {
         self.pending_events = InteractionEvents::default();
 
         if in_plot {
+            self.active_pane = self.pane_index_for_point(y);
             self.crosshair.visible = true;
             self.crosshair.x = x;
             self.crosshair.y = y;
@@ -582,9 +586,9 @@ impl ChartState {
                 .time_scale
                 .x_to_nearest_index(x, &self.layout.plot_area);
             self.crosshair.price = Some(
-                self.panes[0]
+                self.panes[self.active_pane]
                     .price_scale
-                    .y_to_price(y, &self.panes[0].layout_rect),
+                    .y_to_price(y, &self.panes[self.active_pane].layout_rect),
             );
 
             // Handle drag panning (plot area drag)
@@ -680,9 +684,10 @@ impl ChartState {
 
             // Save price scale range for Y-axis drag zoom
             if zone == HitZone::YAxis {
+                self.active_pane = self.pane_index_for_point(y);
                 self.y_axis_drag_start_range = Some((
-                    self.panes[0].price_scale.min_price,
-                    self.panes[0].price_scale.max_price,
+                    self.panes[self.active_pane].price_scale.min_price,
+                    self.panes[self.active_pane].price_scale.max_price,
                 ));
             }
             // Save bar spacing for X-axis drag zoom
@@ -712,10 +717,11 @@ impl ChartState {
                     .time_scale
                     .x_to_nearest_index(x, &self.layout.plot_area),
                 price: if self.layout.plot_area_contains(x, y) {
+                    let p = self.pane_index_for_point(y);
                     Some(
-                        self.panes[0]
+                        self.panes[p]
                             .price_scale
-                            .y_to_price(y, &self.panes[0].layout_rect),
+                            .y_to_price(y, &self.panes[p].layout_rect),
                     )
                 } else {
                     None
@@ -905,8 +911,8 @@ impl ChartState {
             let factor = factor.clamp(0.1, 10.0);
             let mid = (orig_min + orig_max) / 2.0;
             let new_half = range * factor / 2.0;
-            self.panes[0].price_scale.min_price = mid - new_half;
-            self.panes[0].price_scale.max_price = mid + new_half;
+            self.panes[self.active_pane].price_scale.min_price = mid - new_half;
+            self.panes[self.active_pane].price_scale.max_price = mid + new_half;
         }
     }
 
@@ -2200,5 +2206,104 @@ mod tests {
             state.touch.frames_since_down, 0,
             "should not advance when no touches"
         );
+    }
+
+    // ── Per-pane interaction tests ──────────────────────────
+
+    #[test]
+    fn test_active_pane_tracks_hover() {
+        let mut state = make_state();
+        state.add_pane(1.0); // now 2 panes
+
+        // Hover over the middle of pane 0
+        let pane0_mid_y = state.panes[0].layout_rect.y + state.panes[0].layout_rect.height / 2.0;
+        let x = state.panes[0].layout_rect.x + 10.0;
+        state.pointer_move(x, pane0_mid_y);
+        assert_eq!(state.active_pane, 0, "hovering pane 0 → active_pane = 0");
+
+        // Hover over the middle of pane 1
+        let pane1_mid_y = state.panes[1].layout_rect.y + state.panes[1].layout_rect.height / 2.0;
+        state.pointer_move(x, pane1_mid_y);
+        assert_eq!(state.active_pane, 1, "hovering pane 1 → active_pane = 1");
+    }
+
+    #[test]
+    fn test_y_axis_drag_targets_active_pane() {
+        let mut state = make_state();
+        state.add_pane(1.0);
+
+        // Remember pane 1 price range before drag
+        let orig_min = state.panes[1].price_scale.min_price;
+        let orig_max = state.panes[1].price_scale.max_price;
+        let pane0_min_before = state.panes[0].price_scale.min_price;
+        let pane0_max_before = state.panes[0].price_scale.max_price;
+
+        // Simulate Y-axis drag on pane 1
+        let y_axis_x = state.layout.plot_area.x + state.layout.plot_area.width + 5.0;
+        let pane1_mid_y = state.panes[1].layout_rect.y + state.panes[1].layout_rect.height / 2.0;
+
+        state.pointer_down(y_axis_x, pane1_mid_y, 0);
+        assert_eq!(state.active_pane, 1, "pointer_down on pane 1's y-axis");
+
+        // Drag 50px down (zoom out pane 1)
+        state.pointer_move(y_axis_x, pane1_mid_y + 50.0);
+
+        // Pane 1's scale should have changed
+        assert_ne!(state.panes[1].price_scale.min_price, orig_min);
+        assert_ne!(state.panes[1].price_scale.max_price, orig_max);
+
+        // Pane 0's scale should be UNCHANGED
+        assert!(
+            (state.panes[0].price_scale.min_price - pane0_min_before).abs() < 1e-6,
+            "pane 0 min_price unchanged"
+        );
+        assert!(
+            (state.panes[0].price_scale.max_price - pane0_max_before).abs() < 1e-6,
+            "pane 0 max_price unchanged"
+        );
+    }
+
+    #[test]
+    fn test_active_pane_set_on_pointer_down() {
+        let mut state = make_state();
+        state.add_pane(1.0);
+        assert_eq!(state.active_pane, 0);
+
+        let pane1_mid_y = state.panes[1].layout_rect.y + state.panes[1].layout_rect.height / 2.0;
+        let x = state.panes[1].layout_rect.x + 10.0;
+        state.pointer_down(x, pane1_mid_y, 0);
+        // pointer_down on plot area doesn't explicitly set active_pane for Y-axis
+        // but pointer_move on that position does
+        state.pointer_move(x, pane1_mid_y);
+        assert_eq!(state.active_pane, 1);
+    }
+
+    #[test]
+    fn test_crosshair_price_uses_active_pane_scale() {
+        let mut state = make_state();
+        state.add_pane(1.0);
+
+        // Manually set different scale ranges for each pane
+        state.panes[0].price_scale.min_price = 100.0;
+        state.panes[0].price_scale.max_price = 200.0;
+        state.panes[1].price_scale.min_price = 0.0;
+        state.panes[1].price_scale.max_price = 50.0;
+
+        // Hover over pane 1 — crosshair price should use pane 1's scale
+        let pane1_mid_y = state.panes[1].layout_rect.y + state.panes[1].layout_rect.height / 2.0;
+        let x = state.panes[1].layout_rect.x + 10.0;
+        state.pointer_move(x, pane1_mid_y);
+
+        assert_eq!(state.active_pane, 1);
+        // Price should be roughly in pane 1's 0-50 range, not pane 0's 100-200
+        if let Some(price) = state.crosshair.price {
+            assert!(
+                price >= -10.0 && price <= 60.0,
+                "price {} should be in pane 1's range (0-50), not pane 0's (100-200)",
+                price
+            );
+        } else {
+            panic!("crosshair.price should be Some");
+        }
     }
 }

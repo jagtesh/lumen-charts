@@ -86,6 +86,15 @@ pub trait DrawBackend {
 
     /// Measure text width in logical pixels.
     fn measure_text(&self, text: &str, font_size: f64) -> f64;
+
+    // ── Clipping ────────────────────────────────────────────
+
+    /// Push a clip rectangle. All subsequent drawing is clipped to this rect.
+    /// Coordinates are in logical (CSS) pixels.
+    fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64);
+
+    /// Pop the most recent clip rectangle, restoring the previous clip state.
+    fn restore_clip(&mut self);
 }
 
 // ── Pixel-snap helper ───────────────────────────────────────

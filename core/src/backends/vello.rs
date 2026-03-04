@@ -207,4 +207,14 @@ impl DrawBackend for VelloBackend {
     fn measure_text(&self, text: &str, font_size: f64) -> f64 {
         text_render::measure_text(&self.font, text, font_size as f32) as f64
     }
+
+    fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        let rect = KurboRect::new(x, y, x + w, y + h);
+        self.scene
+            .push_layer(peniko::Mix::Clip, 1.0, self.scale, &rect);
+    }
+
+    fn restore_clip(&mut self) {
+        self.scene.pop_layer();
+    }
 }

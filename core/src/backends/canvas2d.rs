@@ -280,4 +280,15 @@ impl DrawBackend for Canvas2DBackend {
             .map(|m| m.width())
             .unwrap_or(text.len() as f64 * font_size * 0.6)
     }
+
+    fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        self.ctx.save();
+        self.ctx.begin_path();
+        self.ctx.rect(x, y, w, h);
+        self.ctx.clip();
+    }
+
+    fn restore_clip(&mut self) {
+        self.ctx.restore();
+    }
 }

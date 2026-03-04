@@ -42,89 +42,110 @@ pub fn render_bottom_scene(b: &mut impl DrawBackend, state: &ChartState) {
     draw_background(b, layout);
     draw_grid(b, state, &time_ticks);
 
-    // Watermark behind bars
+    // Watermark behind bars (global, on pane 0)
     if state.overlays.watermark.visible {
         draw_watermark(b, state);
     }
 
-    // Draw primary series (from state.data, using active_series_type) typically on pane 0
-    match state.active_series_type {
-        SeriesType::Ohlc => draw_ohlc_bars(b, 0, state),
-        SeriesType::Candlestick => draw_candlestick_bars(b, 0, state),
-        SeriesType::Line => draw_line_series_from_ohlc(b, 0, state),
-        SeriesType::Area => {
-            let points = ohlc_to_line_points(&state.data.bars);
-            let opts = crate::series::AreaSeriesOptions::default();
-            draw_area_series(b, 0, state, &points, &opts);
-        }
-        SeriesType::Baseline => {
-            let points = ohlc_to_line_points(&state.data.bars);
-            let opts = crate::series::BaselineSeriesOptions::default();
-            draw_baseline_series(b, 0, state, &points, &opts);
-        }
-        SeriesType::Histogram => {
-            let points: Vec<crate::series::HistogramDataPoint> = state
-                .data
-                .bars
-                .iter()
-                .map(|bar| crate::series::HistogramDataPoint {
-                    time: bar.time,
-                    value: bar.close,
-                    color: None,
-                })
-                .collect();
-            let opts = crate::series::HistogramSeriesOptions::default();
-            draw_histogram_series(b, 0, state, &points, &opts);
-        }
-    }
-
-    // Draw opaque backgrounds for additional panes
-    for pane in &state.panes[1..] {
+    // ── Per-pane rendering: each pane is a clipped virtual surface ──
+    for (pane_idx, pane) in state.panes.iter().enumerate() {
         let r = &pane.layout_rect;
-        b.fill_rect(
-            r.x as f64,
-            r.y as f64,
-            r.width as f64,
-            r.height as f64,
-            BG_COLOR,
-        );
+
+        // Clip to this pane's bounds
+        b.clip_rect(r.x as f64, r.y as f64, r.width as f64, r.height as f64);
+
+        // Opaque background for non-primary panes (pane 0 uses the global background)
+        if pane_idx > 0 {
+            b.fill_rect(
+                r.x as f64,
+                r.y as f64,
+                r.width as f64,
+                r.height as f64,
+                BG_COLOR,
+            );
+        }
+
+        // Draw primary series on pane 0
+        if pane_idx == 0 {
+            match state.active_series_type {
+                SeriesType::Ohlc => draw_ohlc_bars(b, 0, state),
+                SeriesType::Candlestick => draw_candlestick_bars(b, 0, state),
+                SeriesType::Line => draw_line_series_from_ohlc(b, 0, state),
+                SeriesType::Area => {
+                    let points = ohlc_to_line_points(&state.data.bars);
+                    let opts = crate::series::AreaSeriesOptions::default();
+                    draw_area_series(b, 0, state, &points, &opts);
+                }
+                SeriesType::Baseline => {
+                    let points = ohlc_to_line_points(&state.data.bars);
+                    let opts = crate::series::BaselineSeriesOptions::default();
+                    draw_baseline_series(b, 0, state, &points, &opts);
+                }
+                SeriesType::Histogram => {
+                    let points: Vec<crate::series::HistogramDataPoint> = state
+                        .data
+                        .bars
+                        .iter()
+                        .map(|bar| crate::series::HistogramDataPoint {
+                            time: bar.time,
+                            value: bar.close,
+                            color: None,
+                        })
+                        .collect();
+                    let opts = crate::series::HistogramSeriesOptions::default();
+                    draw_histogram_series(b, 0, state, &points, &opts);
+                }
+            }
+        }
+
+        // Draw additional series assigned to this pane
+        for series in &state.series.series {
+            if !series.visible || series.pane_index != pane_idx {
+                continue;
+            }
+            match (&series.series_type, &series.data) {
+                (SeriesType::Line, SeriesData::Line(pts)) => {
+                    draw_line_series(b, pane_idx, state, pts, &series.line_options);
+                }
+                (SeriesType::Area, SeriesData::Line(pts)) => {
+                    draw_area_series(b, pane_idx, state, pts, &series.area_options);
+                }
+                (SeriesType::Baseline, SeriesData::Line(pts)) => {
+                    draw_baseline_series(b, pane_idx, state, pts, &series.baseline_options);
+                }
+                (SeriesType::Candlestick, SeriesData::Ohlc(bars)) => {
+                    draw_candlestick_bars_data(
+                        b,
+                        pane_idx,
+                        state,
+                        bars,
+                        &series.candlestick_options,
+                    );
+                }
+                (SeriesType::Histogram, SeriesData::Histogram(pts)) => {
+                    draw_histogram_series(b, pane_idx, state, pts, &series.histogram_options);
+                }
+                _ => {}
+            }
+        }
+
+        // Per-pane overlays (price lines and last value marker for this pane)
+        if pane_idx == 0 {
+            draw_price_lines(b, state, pane_idx);
+            draw_series_markers(b, state);
+            draw_last_value_marker(b, state, pane_idx);
+        }
+
+        b.restore_clip();
     }
 
-    // Draw additional series from the collection
-    for series in &state.series.series {
-        if !series.visible {
-            continue;
-        }
-        let p_idx = series.pane_index;
-        match (&series.series_type, &series.data) {
-            (SeriesType::Line, SeriesData::Line(pts)) => {
-                draw_line_series(b, p_idx, state, pts, &series.line_options);
-            }
-            (SeriesType::Area, SeriesData::Line(pts)) => {
-                draw_area_series(b, p_idx, state, pts, &series.area_options);
-            }
-            (SeriesType::Baseline, SeriesData::Line(pts)) => {
-                draw_baseline_series(b, p_idx, state, pts, &series.baseline_options);
-            }
-            (SeriesType::Candlestick, SeriesData::Ohlc(bars)) => {
-                draw_candlestick_bars_data(b, p_idx, state, bars, &series.candlestick_options);
-            }
-            (SeriesType::Histogram, SeriesData::Histogram(pts)) => {
-                draw_histogram_series(b, p_idx, state, pts, &series.histogram_options);
-            }
-            _ => {}
-        }
-    }
-
-    // Draw axis gutters (opaque backgrounds + grid labels) FIRST.
-    // This clips series content that overflows into the gutter area.
+    // ── Post-clip: gutters and borders on top of all panes ──
     draw_y_axis(b, state, layout);
     draw_x_axis(b, &time_ticks, layout);
 
-    // Overlays on top of axes — price line labels render ABOVE grid labels
-    draw_price_lines(b, state);
-    draw_series_markers(b, state);
-    draw_last_value_marker(b, state);
+    // Price line labels render in the gutter (ABOVE grid labels, outside clip)
+    draw_price_line_labels(b, state);
+    draw_last_value_label(b, state);
 }
 
 /// Render only the crosshair layer. This is cheap — just 2 dashed lines + labels.
@@ -179,27 +200,16 @@ fn draw_grid(b: &mut impl DrawBackend, state: &ChartState, time_ticks: &[TickMar
             b.stroke_line(r.x as f64, y, (r.x + r.width) as f64, y, grid_color, 1.0);
         }
 
-        // Pane border — extends into the Y-axis gutter area
+        // Pane border — extends full width (no left border)
         let r = &pane.layout_rect;
         let right_edge = state.layout.width as f64;
-        // Top border
-        b.stroke_line(
-            r.x as f64, r.y as f64, right_edge, r.y as f64, AXIS_COLOR, 1.0,
-        );
+        // Top border (from left surface edge to right edge)
+        b.stroke_line(0.0, r.y as f64, right_edge, r.y as f64, AXIS_COLOR, 1.0);
         // Bottom border
         b.stroke_line(
-            r.x as f64,
+            0.0,
             (r.y + r.height) as f64,
             right_edge,
-            (r.y + r.height) as f64,
-            AXIS_COLOR,
-            1.0,
-        );
-        // Left border
-        b.stroke_line(
-            r.x as f64,
-            r.y as f64,
-            r.x as f64,
             (r.y + r.height) as f64,
             AXIS_COLOR,
             1.0,
@@ -275,11 +285,12 @@ fn draw_crosshair(b: &mut impl DrawBackend, state: &ChartState) {
         4.0,
     );
 
-    // Horizontal dashed line
+    // Horizontal dashed line — only within the active pane
+    let active_rect = &state.panes[state.active_pane].layout_rect;
     b.stroke_dashed_line(
-        plot.x as f64,
+        active_rect.x as f64,
         y,
-        (plot.x + plot.width) as f64,
+        (active_rect.x + active_rect.width) as f64,
         y,
         CROSSHAIR_COLOR,
         1.0,
@@ -394,8 +405,10 @@ fn draw_x_axis(
 // Overlay rendering
 // ---------------------------------------------------------------------------
 
-fn draw_price_lines(b: &mut impl DrawBackend, state: &ChartState) {
-    let pane = &state.panes[0];
+/// Draw price line indicators (horizontal lines) within a specific pane.
+/// Called inside clip_rect — lines are clipped to the pane's bounds.
+fn draw_price_lines(b: &mut impl DrawBackend, state: &ChartState, pane_idx: usize) {
+    let pane = &state.panes[pane_idx];
     let plot = &pane.layout_rect;
     let sf = state.layout.scale_factor;
 
@@ -443,23 +456,39 @@ fn draw_price_lines(b: &mut impl DrawBackend, state: &ChartState) {
                 );
             }
         }
+    }
+}
 
-        // Label on Y-axis
-        if line.label_visible {
-            let label_x = (plot.x + plot.width + 2.0) as f64;
-            let label_w = b.measure_text(&line.label, LABEL_FONT_SIZE) + 8.0;
-            let label_h = 16.0;
-            let label_y = y - label_h / 2.0;
+/// Draw price line labels in the Y-axis gutter (outside pane clip).
+fn draw_price_line_labels(b: &mut impl DrawBackend, state: &ChartState) {
+    let pane = &state.panes[0];
+    let plot = &pane.layout_rect;
+    let sf = state.layout.scale_factor;
 
-            b.fill_rect(label_x, label_y, label_w, label_h, color);
-            b.draw_text(
-                &line.label,
-                label_x + 4.0,
-                label_y + 12.0,
-                LABEL_FONT_SIZE,
-                WHITE,
-            );
+    for line in &state.overlays.price_lines {
+        if !line.label_visible {
+            continue;
         }
+        let y = pane.price_scale.price_to_y(line.price, plot);
+        if y < plot.y || y > plot.y + plot.height {
+            continue;
+        }
+        let y = snap_y(y as f64, sf);
+        let color = line.color;
+
+        let label_x = (plot.x + plot.width + 2.0) as f64;
+        let label_w = b.measure_text(&line.label, LABEL_FONT_SIZE) + 8.0;
+        let label_h = 16.0;
+        let label_y = y - label_h / 2.0;
+
+        b.fill_rect(label_x, label_y, label_w, label_h, color);
+        b.draw_text(
+            &line.label,
+            label_x + 4.0,
+            label_y + 12.0,
+            LABEL_FONT_SIZE,
+            WHITE,
+        );
     }
 }
 
@@ -555,9 +584,10 @@ fn draw_watermark(b: &mut impl DrawBackend, state: &ChartState) {
     }
 }
 
-fn draw_last_value_marker(b: &mut impl DrawBackend, state: &ChartState) {
-    let plot = &state.layout.plot_area;
-    let pane = &state.panes[0];
+/// Draw last value dashed line within the specified pane (inside clip).
+fn draw_last_value_marker(b: &mut impl DrawBackend, state: &ChartState, pane_idx: usize) {
+    let pane = &state.panes[pane_idx];
+    let plot = &pane.layout_rect;
 
     if let Some(last_bar) = state.data.bars.last() {
         let price = last_bar.close;
@@ -573,7 +603,40 @@ fn draw_last_value_marker(b: &mut impl DrawBackend, state: &ChartState) {
             BEAR_COLOR
         };
 
-        // Background rectangle on the price axis
+        // Dashed line across the chart (clipped to pane)
+        b.stroke_dashed_line(
+            plot.x as f64,
+            y,
+            (plot.x + plot.width) as f64,
+            y,
+            color,
+            1.0,
+            4.0,
+            3.0,
+        );
+    }
+}
+
+/// Draw last value label in the Y-axis gutter (outside pane clip).
+fn draw_last_value_label(b: &mut impl DrawBackend, state: &ChartState) {
+    let pane = &state.panes[0];
+    let plot = &pane.layout_rect;
+
+    if let Some(last_bar) = state.data.bars.last() {
+        let price = last_bar.close;
+        let y = pane.price_scale.price_to_y(price, plot) as f64;
+
+        if y < plot.y as f64 || y > (plot.y + plot.height) as f64 {
+            return;
+        }
+
+        let color = if last_bar.close >= last_bar.open {
+            BULL_COLOR
+        } else {
+            BEAR_COLOR
+        };
+
+        // Background rectangle on the price axis (gutter)
         let label = format!("{:.2}", price);
         let label_w = b.measure_text(&label, LABEL_FONT_SIZE) + 12.0;
         let label_h = LABEL_FONT_SIZE + 6.0;
@@ -587,18 +650,6 @@ fn draw_last_value_marker(b: &mut impl DrawBackend, state: &ChartState) {
             label_y + LABEL_FONT_SIZE,
             LABEL_FONT_SIZE,
             WHITE,
-        );
-
-        // Dashed line across the chart
-        b.stroke_dashed_line(
-            plot.x as f64,
-            y,
-            (plot.x + plot.width) as f64,
-            y,
-            color,
-            1.0,
-            4.0,
-            3.0,
         );
     }
 }
