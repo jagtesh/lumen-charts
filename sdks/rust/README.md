@@ -2,7 +2,7 @@
 
 The Rust SDK source has moved to the workspace root as a first-class crate.
 
-**Source location:** [`../../sdk/`](../../sdk/)
+**Source location:** [`../../rust-sdk/`](../../rust-sdk/)
 
 ## Usage
 

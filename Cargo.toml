@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "sdk", "sdks/wasm", "examples/rust-demo"]
+members = ["core", "rust-sdk", "sdks/wasm", "examples/rust-demo"]
 resolver = "2"
 
 [package]
@@ -18,4 +18,4 @@ rust-version = "1.75"
 
 [dependencies]
 lumen-charts-core = { path = "core" }
-lumen-charts-sdk = { path = "sdk" }
+lumen-charts-sdk = { path = "rust-sdk" }
