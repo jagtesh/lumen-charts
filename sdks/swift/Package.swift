@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "LightweightCharts",
+    name: "LumenCharts",
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(
-            name: "LightweightCharts",
-            targets: ["LightweightCharts"]
+            name: "LumenCharts",
+            targets: ["LumenCharts"]
         ),
     ],
     targets: [
@@ -16,7 +16,7 @@ let package = Package(
             path: "Sources/CChartCore"
         ),
         .target(
-            name: "LightweightCharts",
+            name: "LumenCharts",
             dependencies: ["CChartCore"],
             path: "Sources/LightweightCharts"
         ),

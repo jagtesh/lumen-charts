@@ -77,7 +77,7 @@ rust-demo:
 
 .PHONY: test
 test:
-	cargo test --workspace --exclude chart-wasm
+	cargo test --workspace --exclude lumen-charts-wasm
 
 .PHONY: clean
 clean:
