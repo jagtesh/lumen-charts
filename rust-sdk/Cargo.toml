@@ -3,8 +3,8 @@ name = "lumen-charts-sdk"
 version = "1.0.0"
 edition = "2021"
 description = "Safe, idiomatic Rust SDK for Lumen Charts (v5 API compatible)"
-publish = false
+publish = true
 
 [dependencies]
-lumen-charts-core = { path = "../core" }
+lumen-charts-core = "2.0.0"
 serde_json = "1"
