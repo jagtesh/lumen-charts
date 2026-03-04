@@ -64,7 +64,7 @@ webgpu-demo: wasm-sdk
 	cd $(WEBGPU_DEMO) && ./run.sh
 
 .PHONY: web-canvas-demo
-web-canvas-demo:
+web-canvas-demo: wasm-sdk
 	cd $(CANVAS_DEMO) && ./run.sh
 
 # ── Rust Demo ────────────────────────────────────────────────

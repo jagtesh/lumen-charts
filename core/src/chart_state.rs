@@ -112,19 +112,26 @@ const CLICK_DISTANCE_THRESHOLD: f32 = 5.0;
 /// We use a frame-count approximation since we don't have real timers.
 const DBL_CLICK_MAX_FRAMES: u32 = 20; // ~20 frames ≈ 333ms at 60fps
 
-/// A single pane containing its own price scale and bounding box
+/// A single pane containing its own price scale and bounding box.
+///
+/// # v5 Design: Index-based identity
+///
+/// In LWC v4/Lumen-original, panes had unique `u32` IDs assigned by a counter.
+/// v5 switched to an index-based model where a pane's position in the `Vec<PaneState>`
+/// *is* its identity (`paneIndex`). This is simpler and matches the v5 API semantics
+/// where `addSeries(def, opts, paneIndex)` and `getPane().paneIndex()` use indices.
+///
+/// No backwards-compatibility shim is needed — we directly adopt v5's model.
 #[derive(Debug, Clone)]
 pub struct PaneState {
-    pub id: u32,
     pub price_scale: PriceScale,
     pub height_stretch: f32,
     pub layout_rect: crate::chart_model::Rect,
 }
 
 impl PaneState {
-    pub fn new(id: u32, price_scale: PriceScale, layout_rect: crate::chart_model::Rect) -> Self {
+    pub fn new(price_scale: PriceScale, layout_rect: crate::chart_model::Rect) -> Self {
         Self {
-            id,
             price_scale,
             height_stretch: 1.0,
             layout_rect,
@@ -234,8 +241,7 @@ pub struct ChartState {
     /// Pending invalidation mask — accumulated between renders
     pub pending_mask: InvalidateMask,
 
-    /// Counter for auto-incrementing pane IDs
-    next_pane_id: u32,
+    // v5: Panes use index-based identity. No ID counter needed.
 
     // --- Render counters (for testing and profiling) ---
     /// Number of full bottom-scene renders (background + grid + series + axes)
@@ -264,7 +270,7 @@ impl ChartState {
         let layout = ChartLayout::new(width, height, scale_factor);
         let time_scale = TimeScale::new(data.bars.len(), layout.plot_area.width);
         let price_scale = PriceScale::from_data(&data.bars);
-        let panes = vec![PaneState::new(0, price_scale, layout.plot_area)];
+        let panes = vec![PaneState::new(price_scale, layout.plot_area)];
 
         let mut state = ChartState {
             data,
@@ -285,7 +291,7 @@ impl ChartState {
             x_axis_drag_start_spacing: None,
             pending_events: InteractionEvents::default(),
             pending_mask: InvalidateMask::full(), // first render needs full paint
-            next_pane_id: 1,                      // pane 0 is already created
+            // v5: Panes use index-based identity. No ID counter needed.
             bottom_render_count: 0,
             crosshair_render_count: 0,
             skipped_render_count: 0,
@@ -431,99 +437,93 @@ impl ChartState {
         }
     }
 
-    /// Add a new pane to the chart. Returns the pane ID.
+    /// Add a new pane to the chart. Returns the pane *index* (v5 model).
     /// `height_stretch` controls how much vertical space this pane gets relative to others.
     pub fn add_pane(&mut self, height_stretch: f32) -> u32 {
-        let id = self.next_pane_id;
-        self.next_pane_id += 1;
         let price_scale = PriceScale::from_data(&[]);
-        let pane = PaneState {
-            id,
+        let mut pane = PaneState::new(
             price_scale,
-            height_stretch,
-            layout_rect: crate::chart_model::Rect {
+            crate::chart_model::Rect {
                 x: 0.0,
                 y: 0.0,
                 width: 0.0,
                 height: 0.0,
             },
-        };
+        );
+        pane.height_stretch = height_stretch;
         self.panes.push(pane);
+        let index = (self.panes.len() - 1) as u32;
         self.update_panes_layout();
         self.update_price_scale();
         self.pending_mask.set_global(InvalidationLevel::Full);
-        id
+        index
     }
 
-    /// Remove a pane by ID. Returns true if the pane was found and removed.
+    /// Remove a pane by index (v5 model). Returns true if the pane was removed.
     /// Pane 0 (the main pane) cannot be removed.
     /// Any series assigned to this pane are moved back to pane 0.
-    pub fn remove_pane(&mut self, pane_id: u32) -> bool {
-        if pane_id == 0 {
+    pub fn remove_pane(&mut self, pane_index: u32) -> bool {
+        let idx = pane_index as usize;
+        if idx == 0 || idx >= self.panes.len() {
             return false;
         }
-        let idx = self.panes.iter().position(|p| p.id == pane_id);
-        if let Some(idx) = idx {
-            self.panes.remove(idx);
-            // Move orphaned series back to pane 0
-            for series in &mut self.series.series {
-                if series.pane_index == idx {
-                    series.pane_index = 0;
-                } else if series.pane_index > idx {
-                    series.pane_index -= 1;
-                }
+        self.panes.remove(idx);
+        // Move orphaned series back to pane 0, adjust indices for panes that shifted
+        for series in &mut self.series.series {
+            if series.pane_index == idx {
+                series.pane_index = 0;
+            } else if series.pane_index > idx {
+                series.pane_index -= 1;
             }
-            self.update_panes_layout();
-            self.update_price_scale();
-            self.pending_mask.set_global(InvalidationLevel::Full);
-            true
-        } else {
-            false
         }
+        self.update_panes_layout();
+        self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Full);
+        true
     }
 
-    /// Move a series to a specific pane (by pane ID).
+    /// Move a series to a specific pane by index (v5 model).
     /// Returns true if both the series and pane were found.
-    pub fn move_series_to_pane(&mut self, series_id: u32, pane_id: u32) -> bool {
-        let pane_idx = self.panes.iter().position(|p| p.id == pane_id);
-        if let Some(pane_idx) = pane_idx {
-            if let Some(series) = self.series.get_mut(series_id) {
-                series.pane_index = pane_idx;
-                self.update_price_scale();
-                self.pending_mask.set_global(InvalidationLevel::Full);
-                return true;
-            }
+    pub fn move_series_to_pane(&mut self, series_id: u32, pane_index: u32) -> bool {
+        let idx = pane_index as usize;
+        if idx >= self.panes.len() {
+            return false;
+        }
+        if let Some(series) = self.series.get_mut(series_id) {
+            series.pane_index = idx;
+            self.update_price_scale();
+            self.pending_mask.set_global(InvalidationLevel::Full);
+            return true;
         }
         false
     }
 
-    /// Swap two panes by their IDs. Returns true if both were found and swapped.
-    pub fn swap_panes(&mut self, pane_id_a: u32, pane_id_b: u32) -> bool {
-        let idx_a = self.panes.iter().position(|p| p.id == pane_id_a);
-        let idx_b = self.panes.iter().position(|p| p.id == pane_id_b);
-        if let (Some(a), Some(b)) = (idx_a, idx_b) {
-            self.panes.swap(a, b);
-            // Update series pane_index references
-            for series in &mut self.series.series {
-                if series.pane_index == a {
-                    series.pane_index = b;
-                } else if series.pane_index == b {
-                    series.pane_index = a;
-                }
-            }
-            self.update_panes_layout();
-            self.update_price_scale();
-            self.pending_mask.set_global(InvalidationLevel::Full);
-            true
-        } else {
-            false
+    /// Swap two panes by their indices (v5 model). Returns true if both were valid.
+    pub fn swap_panes(&mut self, index_a: u32, index_b: u32) -> bool {
+        let a = index_a as usize;
+        let b = index_b as usize;
+        if a >= self.panes.len() || b >= self.panes.len() || a == b {
+            return false;
         }
+        self.panes.swap(a, b);
+        // Update series pane_index references
+        for series in &mut self.series.series {
+            if series.pane_index == a {
+                series.pane_index = b;
+            } else if series.pane_index == b {
+                series.pane_index = a;
+            }
+        }
+        self.update_panes_layout();
+        self.update_price_scale();
+        self.pending_mask.set_global(InvalidationLevel::Full);
+        true
     }
 
-    /// Get the layout rect (x, y, width, height) for a pane by ID.
-    /// Returns None if the pane doesn't exist.
-    pub fn pane_size(&self, pane_id: u32) -> Option<(f32, f32, f32, f32)> {
-        self.panes.iter().find(|p| p.id == pane_id).map(|p| {
+    /// Get the layout rect (x, y, width, height) for a pane by index (v5 model).
+    /// Returns None if the index is out of bounds.
+    pub fn pane_size(&self, pane_index: u32) -> Option<(f32, f32, f32, f32)> {
+        self.panes.get(pane_index as usize).map(|p| {
             (
                 p.layout_rect.x,
                 p.layout_rect.y,
@@ -531,6 +531,18 @@ impl ChartState {
                 p.layout_rect.height,
             )
         })
+    }
+
+    /// Determine which pane index a given y coordinate falls within.
+    /// Returns the pane index, or 0 if no match (defaults to main pane).
+    pub fn pane_index_for_point(&self, y: f32) -> usize {
+        for (i, pane) in self.panes.iter().enumerate() {
+            let r = &pane.layout_rect;
+            if y >= r.y && y < r.y + r.height {
+                return i;
+            }
+        }
+        0
     }
 
     /// Determine which zone a point is in
@@ -1669,18 +1681,25 @@ mod tests {
     }
 
     #[test]
-    fn test_sequential_pane_ids() {
+    fn test_sequential_pane_indices() {
         let mut state = make_state();
-        let id1 = state.add_pane(1.0);
-        let id2 = state.add_pane(1.0);
-        let id3 = state.add_pane(1.0);
-        assert_eq!(id1, 1);
-        assert_eq!(id2, 2);
-        assert_eq!(id3, 3);
-        // Remove middle pane — IDs should not be reused
-        state.remove_pane(id2);
-        let id4 = state.add_pane(1.0);
-        assert_eq!(id4, 4); // not 2
+        // Pane 0 already exists (main pane).
+        // add_pane returns the *index* of the new pane:
+        let idx1 = state.add_pane(1.0);
+        let idx2 = state.add_pane(1.0);
+        let idx3 = state.add_pane(1.0);
+        assert_eq!(idx1, 1); // [main, 1]
+        assert_eq!(idx2, 2); // [main, 1, 2]
+        assert_eq!(idx3, 3); // [main, 1, 2, 3]
+        assert_eq!(state.panes.len(), 4);
+
+        // Remove pane at index 2 — remaining panes shift down
+        state.remove_pane(2);
+        assert_eq!(state.panes.len(), 3); // [main, 1, 3(shifted to idx 2)]
+
+        // Next add returns the new last index
+        let idx4 = state.add_pane(1.0);
+        assert_eq!(idx4, 3); // [main, 1, old3, new] → index 3
     }
 
     #[test]

@@ -36,12 +36,20 @@ bool chart_key_down(Chart* chart, uint32_t key_code);
 void chart_tick(Chart* chart);
 
 // Events & Callbacks
+//
+// v5 alignment: ChartEventParam mirrors MouseEventParams with pane_index,
+// hovered_series_id, and series_count. Per-series data is available via the
+// pull-based chart_event_series_data() accessor (avoids JSON overhead on
+// the ~60fps crosshair hot path).
 typedef struct {
-    int64_t time;
-    double logical;
-    float point_x;
-    float point_y;
-    double price;
+    int64_t  time;
+    double   logical;
+    float    point_x;
+    float    point_y;
+    double   price;
+    uint32_t pane_index;          // v5: which pane the event occurred in
+    uint32_t hovered_series_id;   // v5: series under cursor (0 = none)
+    uint32_t series_count;        // v5: number of series with data at this position
 } ChartEventParam;
 
 typedef void (*ChartEventCallback)(const ChartEventParam* param, void* user_data);
@@ -105,13 +113,21 @@ uint32_t chart_add_histogram_series(Chart* chart, const int64_t* times, const do
 bool chart_remove_series(Chart* chart, uint32_t series_id);
 uint32_t chart_series_count(const Chart* chart);
 
-// Multi-pane management
-uint32_t chart_add_pane(Chart* chart, float height_stretch);
-bool chart_remove_pane(Chart* chart, uint32_t pane_id);
-bool chart_series_move_to_pane(Chart* chart, uint32_t series_id, uint32_t pane_id);
+// Multi-pane management (v5: index-based, not ID-based)
+uint32_t chart_add_pane(Chart* chart, float height_stretch);           // returns pane index
+bool chart_remove_pane(Chart* chart, uint32_t pane_index);             // pane 0 cannot be removed
+bool chart_series_move_to_pane(Chart* chart, uint32_t series_id, uint32_t pane_index);
 uint32_t chart_pane_count(const Chart* chart);
-bool chart_swap_panes(Chart* chart, uint32_t pane_id_a, uint32_t pane_id_b);
-bool chart_pane_size(const Chart* chart, uint32_t pane_id, float* out_x, float* out_y, float* out_width, float* out_height);
+bool chart_swap_panes(Chart* chart, uint32_t index_a, uint32_t index_b);
+bool chart_pane_size(const Chart* chart, uint32_t pane_index, float* out_x, float* out_y, float* out_width, float* out_height);
+
+// v5 Series extensions
+uint32_t chart_series_get_pane_index(const Chart* chart, uint32_t series_id);  // returns UINT32_MAX if not found
+uint32_t chart_series_order(const Chart* chart, uint32_t series_id);           // z-order within pane
+bool     chart_series_set_order(Chart* chart, uint32_t series_id, uint32_t order);
+
+// v5 Event series data accessor (pull-based, call inside crosshair callback)
+uint32_t chart_event_series_data(const Chart* chart, uint32_t* out_series_ids, double* out_values, uint32_t max_count);
 
 // Double-click events
 void chart_subscribe_dbl_click(Chart* chart, ChartEventCallback callback, void* user_data);

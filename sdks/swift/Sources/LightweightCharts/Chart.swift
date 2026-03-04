@@ -179,20 +179,20 @@ public class Chart {
     /// Add a new pane
     @discardableResult
     public func addPane(heightStretch: Float = 1.0) -> PaneHandle {
-        let id = chart_add_pane(ptr, heightStretch)
-        return PaneHandle(id: id)
+        let index = chart_add_pane(ptr, heightStretch)
+        return PaneHandle(index: index)
     }
 
     /// Remove a pane
     @discardableResult
     public func removePane(_ pane: PaneHandle) -> Bool {
-        chart_remove_pane(ptr, pane.id)
+        chart_remove_pane(ptr, pane.index)
     }
 
     /// Swap two panes
     @discardableResult
     public func swapPanes(_ a: PaneHandle, _ b: PaneHandle) -> Bool {
-        chart_swap_panes(ptr, a.id, b.id)
+        chart_swap_panes(ptr, a.index, b.index)
     }
 
     /// Get pane count
@@ -203,7 +203,7 @@ public class Chart {
     /// Get pane layout rect
     public func paneSize(_ pane: PaneHandle) -> (x: Float, y: Float, width: Float, height: Float)? {
         var x: Float = 0, y: Float = 0, w: Float = 0, h: Float = 0
-        if chart_pane_size(ptr, pane.id, &x, &y, &w, &h) {
+        if chart_pane_size(ptr, pane.index, &x, &y, &w, &h) {
             return (x, y, w, h)
         }
         return nil
@@ -305,7 +305,10 @@ public class Chart {
                 price: param.pointee.price,
                 pointX: param.pointee.point_x,
                 pointY: param.pointee.point_y,
-                logical: param.pointee.logical
+                logical: param.pointee.logical,
+                paneIndex: param.pointee.pane_index,
+                hoveredSeriesId: param.pointee.hovered_series_id,
+                seriesCount: param.pointee.series_count
             )
             chart.clickHandler?(event)
         }, ctx)
@@ -323,7 +326,10 @@ public class Chart {
                 price: param.pointee.price,
                 pointX: param.pointee.point_x,
                 pointY: param.pointee.point_y,
-                logical: param.pointee.logical
+                logical: param.pointee.logical,
+                paneIndex: param.pointee.pane_index,
+                hoveredSeriesId: param.pointee.hovered_series_id,
+                seriesCount: param.pointee.series_count
             )
             chart.dblClickHandler?(event)
         }, ctx)
@@ -341,7 +347,10 @@ public class Chart {
                 price: param.pointee.price,
                 pointX: param.pointee.point_x,
                 pointY: param.pointee.point_y,
-                logical: param.pointee.logical
+                logical: param.pointee.logical,
+                paneIndex: param.pointee.pane_index,
+                hoveredSeriesId: param.pointee.hovered_series_id,
+                seriesCount: param.pointee.series_count
             )
             chart.crosshairMoveHandler?(event)
         }, ctx)

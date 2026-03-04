@@ -30,7 +30,6 @@
             overflow: hidden;
             margin-bottom: 20px;
             background: #1f1f1f;
-            position: relative;
         }
 
         canvas {
@@ -48,19 +47,6 @@
             font-size: 13px;
         }
 
-        #badge {
-            position: fixed;
-            top: 16px;
-            right: 16px;
-            background: #2962ff;
-            color: #fff;
-            font-size: 11px;
-            font-weight: 600;
-            padding: 4px 12px;
-            border-radius: 12px;
-            letter-spacing: 0.5px;
-        }
-
         #controls {
             display: flex;
             align-items: center;
@@ -73,10 +59,11 @@
             background: #333;
             color: #eee;
             border: 1px solid #444;
-            padding: 6px 16px;
-            border-radius: 6px;
-            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 4px;
             cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
         }
 
         .btn:hover {
@@ -87,59 +74,66 @@
             background: #333;
             color: #eee;
             border: 1px solid #444;
-            padding: 6px 12px;
-            border-radius: 6px;
+            padding: 6px;
+            border-radius: 4px;
             font-size: 13px;
         }
 
         #help {
-            color: #555;
-            font-size: 11px;
-            width: 900px;
-            text-align: center;
+            color: #666;
+            font-size: 12px;
+        }
+
+        #renderer-badge {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            background: #2a5a3a;
+            color: #8fd;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
         }
     </style>
 </head>
 
 <body>
-    <div id="status">Loading Canvas 2D…</div>
-    <div id="badge">Canvas 2D</div>
-    <div id="chart-container">
+    <div id="status">Loading Canvas 2D chart...</div>
+    <div id="renderer-badge">Canvas 2D</div>
+    <div id="chart-container" tabindex="0">
         <canvas id="chart-canvas"></canvas>
     </div>
     <div id="controls">
+        <span style="color: #aaa; font-size: 13px;">Chart Type:</span>
         <select id="sel-chart-type">
-            <option value="candle" selected>Candlestick</option>
             <option value="ohlc">OHLC</option>
+            <option value="candle">Candle</option>
             <option value="line">Line</option>
             <option value="area">Area</option>
+            <option value="hist">Histogram</option>
+            <option value="base">Baseline</option>
         </select>
         <button class="btn" id="btn-fit">Fit Content</button>
+        <button class="btn" id="btn-overlay">Toggle Overlay</button>
+        <button class="btn" id="btn-macd">Toggle MACD</button>
     </div>
     <div id="help">
-        No WebGPU required — runs on any browser with Canvas 2D support.<br>
         Scroll: pan &nbsp;|&nbsp; Ctrl+Scroll: zoom &nbsp;|&nbsp; Drag: pan &nbsp;|&nbsp;
-        Double-click: fit all
+        Drag Y-axis: zoom price &nbsp;|&nbsp; Double-click: fit all &nbsp;|&nbsp;
+        Arrow keys: navigate
     </div>
 
-    <script>
-        // ── Canvas 2D Chart Renderer ──────────────────────────────
-        // Pure JS demo showing Canvas 2D rendering — mirrors what
-        // the Rust Canvas2DBackend does via web_sys.
+    <script type="module">
+        import { createChart } from './pkg/chart_api.js';
 
-        const BG = '#12121a';
-        const GRID = '#1e1e2a';
-        const AXIS = '#666680';
-        const BULL = '#26a69a';
-        const BEAR = '#ef5350';
-        const TEXT = '#99a0b0';
-        const CROSS = 'rgba(128,128,150,0.6)';
-        const LINE_CLR = '#2962ff';
-        const AREA_TOP = 'rgba(41,98,255,0.3)';
-        const AREA_BOT = 'rgba(41,98,255,0.0)';
+        let chart;
+        let overlaySeries = null;
+        let macdPane = null;
+        let macdSeriesList = [];
+        let sampleDataCache = null;
 
-        // ── Data generation (same LCG as Rust/Swift) ─────────────
         function generateSampleData() {
+            if (sampleDataCache) return sampleDataCache;
             const baseTime = 1704153600;
             const day = 86400;
             let price = 185.0;
@@ -162,336 +156,129 @@
                 data.push({ time, open, high, low, close, value: close });
                 price = close;
             }
+            sampleDataCache = data;
             return data;
         }
 
-        // ── Chart state ──────────────────────────────────────────
-        const data = generateSampleData();
-        let chartType = 'candle';
-        // scrollIndex: fractional bar index of the rightmost visible bar.
-        // Starts at data.length (showing latest bars at right edge).
-        let scrollIndex = data.length;
-        let barSpacing = 8;
-        let crosshair = { x: -1, y: -1, visible: false };
-        let drag = { active: false, startX: 0, startIndex: 0 };
-
-        const margins = { top: 10, right: 60, bottom: 30, left: 5 };
-
-        // ── Viewport ─────────────────────────────────────────────
-        function visibleBars(plotW) {
-            return Math.ceil(plotW / barSpacing);
+        function generateOverlayData() {
+            return generateSampleData().map(d => ({
+                time: d.time,
+                value: d.close * (1.0 + Math.sin(d.time / 86400.0) * 0.05)
+            }));
         }
 
-        function visibleRange(plotW) {
-            const count = visibleBars(plotW);
-            const last = Math.min(data.length, Math.round(scrollIndex));
-            const first = Math.max(0, last - count);
-            return [first, last];
-        }
-
-        function clampScroll(plotW) {
-            const count = visibleBars(plotW);
-            // Minimum: show at least `count` bars from the start, or all data
-            const minIndex = Math.min(data.length, count);
-            scrollIndex = Math.max(minIndex, Math.min(data.length, scrollIndex));
-        }
-
-        function priceRange(first, last) {
-            let hi = -Infinity, lo = Infinity;
-            for (let i = first; i < last; i++) {
-                hi = Math.max(hi, data[i].high);
-                lo = Math.min(lo, data[i].low);
-            }
-            const pad = (hi - lo) * 0.1 || 1;
-            return [lo - pad, hi + pad];
-        }
-
-        function indexToX(i, first, plotX) {
-            return plotX + (i - first) * barSpacing + barSpacing / 2;
-        }
-
-        function priceToY(price, plo, phi, plotY, plotH) {
-            return plotY + plotH - ((price - plo) / (phi - plo)) * plotH;
-        }
-
-        // ── Pixel snap (matches Rust snap()) ─────────────────────
-        function snap(coord, scale) {
-            if (scale <= 0) return coord;
-            return Math.round(coord * scale) / scale + 0.5 / scale;
-        }
-
-        // ── Render ───────────────────────────────────────────────
-        function render() {
-            const canvas = document.getElementById('chart-canvas');
-            const ctx = canvas.getContext('2d');
-            const dpr = window.devicePixelRatio || 1;
-
-            const cssW = canvas.clientWidth;
-            const cssH = canvas.clientHeight;
-
-            // Predicted bitmap size (fancy-canvas pattern)
-            const rect = canvas.getBoundingClientRect();
-            const bw = Math.round(rect.left * dpr + rect.width * dpr) - Math.round(rect.left * dpr);
-            const bh = Math.round(rect.top * dpr + rect.height * dpr) - Math.round(rect.top * dpr);
-            canvas.width = bw;
-            canvas.height = bh;
-
-            // Begin frame — clear + scale (matches Canvas2DBackend.begin_frame)
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.clearRect(0, 0, bw, bh);
-            ctx.save();
-            ctx.scale(dpr, dpr);
-
-            const plotX = margins.left;
-            const plotY = margins.top;
-            const plotW = cssW - margins.left - margins.right;
-            const plotH = cssH - margins.top - margins.bottom;
-
-            // Clamp scroll before computing visible range
-            clampScroll(plotW);
-
-            // Background
-            ctx.fillStyle = BG;
-            ctx.fillRect(0, 0, cssW, cssH);
-
-            const [first, last] = visibleRange(plotW);
-            const [plo, phi] = priceRange(first, last);
-
-            // ── Grid ─────────────────────────────────────────
-            ctx.strokeStyle = GRID;
-            ctx.lineWidth = 1;
-            const gridSteps = 6;
-            // Horizontal grid lines
-            for (let i = 0; i <= gridSteps; i++) {
-                const y = snap(plotY + plotH * (i / gridSteps), dpr);
-                ctx.beginPath();
-                ctx.moveTo(plotX, y);
-                ctx.lineTo(plotX + plotW, y);
-                ctx.stroke();
-            }
-            // Vertical grid lines (aligned with X-axis label positions)
-            const vStep = Math.max(1, Math.floor((last - first) / 8));
-            for (let i = first; i < last; i += vStep) {
-                const x = snap(indexToX(i, first, plotX), dpr);
-                ctx.beginPath();
-                ctx.moveTo(x, plotY);
-                ctx.lineTo(x, plotY + plotH);
-                ctx.stroke();
+        function calculateMACD(bars, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+            function calcEMA(data, period) {
+                const k = 2.0 / (period + 1);
+                let currentEma = 0.0;
+                return data.map((d, i) => {
+                    const price = d.close;
+                    currentEma = i === 0 ? price : price * k + currentEma * (1.0 - k);
+                    return currentEma;
+                });
             }
 
-            // ── Series ───────────────────────────────────────
-            if (chartType === 'candle' || chartType === 'ohlc') {
-                for (let i = first; i < last; i++) {
-                    const d = data[i];
-                    const x = snap(indexToX(i, first, plotX), dpr);
-                    const openY = priceToY(d.open, plo, phi, plotY, plotH);
-                    const closeY = priceToY(d.close, plo, phi, plotY, plotH);
-                    const highY = priceToY(d.high, plo, phi, plotY, plotH);
-                    const lowY = priceToY(d.low, plo, phi, plotY, plotH);
-                    const bull = d.close >= d.open;
-                    const color = bull ? BULL : BEAR;
+            const fastEMA = calcEMA(bars, fastPeriod);
+            const slowEMA = calcEMA(bars, slowPeriod);
+            const macdValues = bars.map((bar, i) => ({
+                time: bar.time, close: fastEMA[i] - slowEMA[i]
+            }));
+            const signalEMA = calcEMA(macdValues, signalPeriod);
 
-                    // Wick
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = 1;
-                    ctx.beginPath();
-                    ctx.moveTo(x, highY);
-                    ctx.lineTo(x, lowY);
-                    ctx.stroke();
+            const macdLine = [], signalLine = [], histogram = [];
+            for (let i = 0; i < bars.length; i++) {
+                const time = bars[i].time;
+                const macd = macdValues[i].close;
+                const signal = signalEMA[i];
+                macdLine.push({ time, value: macd });
+                signalLine.push({ time, value: signal });
+                histogram.push({ time, value: macd - signal });
+            }
+            return { macdLine, signalLine, histogram };
+        }
 
-                    if (chartType === 'candle') {
-                        const bodyW = Math.max(barSpacing * 0.6, 2);
-                        const bodyTop = Math.min(openY, closeY);
-                        const bodyH = Math.max(Math.abs(closeY - openY), 1);
-                        ctx.fillStyle = color;
-                        ctx.fillRect(x - bodyW / 2, bodyTop, bodyW, bodyH);
-                    } else {
-                        // OHLC ticks
-                        const tw = barSpacing * 0.3;
-                        ctx.lineWidth = 1.5;
-                        ctx.beginPath();
-                        ctx.moveTo(x - tw, snap(openY, dpr));
-                        ctx.lineTo(x, snap(openY, dpr));
-                        ctx.stroke();
-                        ctx.beginPath();
-                        ctx.moveTo(x, snap(closeY, dpr));
-                        ctx.lineTo(x + tw, snap(closeY, dpr));
-                        ctx.stroke();
-                    }
+        const seriesTypeMap = {
+            'ohlc': 'ohlc', 'candle': 'candlestick', 'line': 'line',
+            'area': 'area', 'hist': 'histogram', 'base': 'baseline'
+        };
+
+        async function run() {
+            const status = document.getElementById('status');
+
+            try {
+                // Use Canvas 2D renderer — no WebGPU required!
+                chart = await createChart(
+                    document.getElementById('chart-container'),
+                    { renderer: 'canvas2d' }
+                );
+
+                chart.applyOptions({
+                    layout: { background: { color: "#1f1f1f" }, textColor: "#d1d4dc" },
+                    grid: { vertLines: { color: "#333" }, horzLines: { color: "#333" } }
+                });
+
+                chart.setData(generateSampleData());
+                chart.fitContent();
+
+                status.textContent = 'OHLC Bars • 100 bars from JS (Canvas 2D)';
+                status.style.color = '#26a69a';
+            } catch (e) {
+                console.error(e);
+                status.textContent = `❌ Error: ${e.message}`;
+                status.style.color = '#ef5350';
+                return;
+            }
+
+            const typeNames = {
+                'ohlc': 'OHLC Bars', 'candle': 'Candlestick', 'line': 'Line',
+                'area': 'Area', 'hist': 'Histogram', 'base': 'Baseline'
+            };
+
+            document.getElementById('sel-chart-type').addEventListener('change', (e) => {
+                chart.setSeriesType(seriesTypeMap[e.target.value]);
+                status.textContent = `${typeNames[e.target.value]} • Canvas 2D`;
+            });
+
+            document.getElementById('btn-fit').addEventListener('click', () => chart.fitContent());
+
+            document.getElementById('btn-overlay').addEventListener('click', () => {
+                if (overlaySeries) {
+                    chart.removeSeries(overlaySeries);
+                    overlaySeries = null;
+                } else {
+                    overlaySeries = chart.addAreaSeries({});
+                    overlaySeries.setData(generateOverlayData());
                 }
-            } else if (chartType === 'line' || chartType === 'area') {
-                ctx.beginPath();
-                let started = false;
-                for (let i = first; i < last; i++) {
-                    const x = indexToX(i, first, plotX);
-                    const y = priceToY(data[i].close, plo, phi, plotY, plotH);
-                    if (!started) { ctx.moveTo(x, y); started = true; }
-                    else ctx.lineTo(x, y);
+            });
+
+            document.getElementById('btn-macd').addEventListener('click', () => {
+                if (macdPane) {
+                    macdSeriesList.forEach(s => chart.removeSeries(s));
+                    macdSeriesList = [];
+                    chart.removePane(macdPane);
+                    macdPane = null;
+                } else {
+                    macdPane = chart.addPane(0.3);
+                    const macd = calculateMACD(generateSampleData());
+
+                    const histSeries = chart.addHistogramSeries({});
+                    histSeries.moveToPane(macdPane);
+                    histSeries.setData(macd.histogram);
+
+                    const macdLineSeries = chart.addLineSeries({ color: 'rgb(51, 153, 255)', lineWidth: 1.5 });
+                    macdLineSeries.moveToPane(macdPane);
+                    macdLineSeries.setData(macd.macdLine);
+
+                    const signalSeries = chart.addLineSeries({ color: 'rgb(255, 153, 51)', lineWidth: 1.5 });
+                    signalSeries.moveToPane(macdPane);
+                    signalSeries.setData(macd.signalLine);
+
+                    macdSeriesList = [histSeries, macdLineSeries, signalSeries];
                 }
-                if (chartType === 'area') {
-                    // Area fill
-                    const lastX = indexToX(last - 1, first, plotX);
-                    const firstX = indexToX(first, first, plotX);
-                    ctx.lineTo(lastX, plotY + plotH);
-                    ctx.lineTo(firstX, plotY + plotH);
-                    ctx.closePath();
-                    const grad = ctx.createLinearGradient(0, plotY, 0, plotY + plotH);
-                    grad.addColorStop(0, AREA_TOP);
-                    grad.addColorStop(1, AREA_BOT);
-                    ctx.fillStyle = grad;
-                    ctx.fill();
-                }
-                // Line stroke
-                ctx.beginPath();
-                started = false;
-                for (let i = first; i < last; i++) {
-                    const x = indexToX(i, first, plotX);
-                    const y = priceToY(data[i].close, plo, phi, plotY, plotH);
-                    if (!started) { ctx.moveTo(x, y); started = true; }
-                    else ctx.lineTo(x, y);
-                }
-                ctx.strokeStyle = LINE_CLR;
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            }
-
-            // ── Y-axis labels ────────────────────────────────
-            ctx.fillStyle = TEXT;
-            ctx.font = '11px system-ui, sans-serif';
-            ctx.textBaseline = 'middle';
-            for (let i = 0; i <= gridSteps; i++) {
-                const frac = i / gridSteps;
-                const price = phi - (phi - plo) * frac;
-                const y = plotY + plotH * frac;
-                ctx.fillText(price.toFixed(2), plotX + plotW + 6, y);
-            }
-
-            // ── X-axis labels ────────────────────────────────
-            ctx.textBaseline = 'top';
-            ctx.textAlign = 'center';
-            const step = Math.max(1, Math.floor((last - first) / 8));
-            for (let i = first; i < last; i += step) {
-                const x = indexToX(i, first, plotX);
-                const date = new Date(data[i].time * 1000);
-                const label = `${date.getMonth() + 1}/${date.getDate()}`;
-                ctx.fillText(label, x, plotY + plotH + 8);
-            }
-            ctx.textAlign = 'start';
-
-            // ── Crosshair ────────────────────────────────────
-            if (crosshair.visible && !drag.active) {
-                const cx = snap(crosshair.x, dpr);
-                const cy = snap(crosshair.y, dpr);
-                ctx.setLineDash([4, 4]);
-                ctx.strokeStyle = CROSS;
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(cx, plotY);
-                ctx.lineTo(cx, plotY + plotH);
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.moveTo(plotX, cy);
-                ctx.lineTo(plotX + plotW, cy);
-                ctx.stroke();
-                ctx.setLineDash([]);
-
-                // Price label
-                const crossPrice = plo + (phi - plo) * (1 - (cy - plotY) / plotH);
-                ctx.fillStyle = 'rgba(40,40,60,0.9)';
-                ctx.fillRect(plotX + plotW + 1, cy - 9, margins.right - 2, 18);
-                ctx.fillStyle = '#fff';
-                ctx.font = '10px system-ui, sans-serif';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(crossPrice.toFixed(2), plotX + plotW + 5, cy);
-            }
-
-            // ── Plot border ──────────────────────────────────
-            ctx.strokeStyle = AXIS;
-            ctx.lineWidth = 1;
-            ctx.setLineDash([]);
-            ctx.strokeRect(plotX, plotY, plotW, plotH);
-
-            // End frame
-            ctx.restore();
-
-            requestAnimationFrame(render);
+            });
         }
 
-        // ── Event handlers ───────────────────────────────────────
-        const canvas = document.getElementById('chart-canvas');
-
-        canvas.addEventListener('mousemove', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const mx = e.clientX - rect.left;
-            const my = e.clientY - rect.top;
-
-            if (drag.active) {
-                // Drag-to-pan: convert px delta to bar index delta
-                const dx = mx - drag.startX;
-                scrollIndex = drag.startIndex - dx / barSpacing;
-            } else {
-                crosshair.x = mx;
-                crosshair.y = my;
-                crosshair.visible = true;
-            }
-        });
-
-        canvas.addEventListener('mousedown', (e) => {
-            e.preventDefault(); // prevent text selection during drag
-            const rect = canvas.getBoundingClientRect();
-            drag.active = true;
-            drag.startX = e.clientX - rect.left;
-            drag.startIndex = scrollIndex;
-            canvas.style.cursor = 'grabbing';
-            crosshair.visible = false;
-        });
-
-        canvas.addEventListener('dblclick', () => {
-            scrollIndex = data.length;
-            barSpacing = 8;
-        });
-
-        canvas.addEventListener('mouseup', () => {
-            drag.active = false;
-            canvas.style.cursor = 'crosshair';
-        });
-
-        canvas.addEventListener('mouseleave', () => {
-            drag.active = false;
-            crosshair.visible = false;
-            canvas.style.cursor = 'crosshair';
-        });
-
-        canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            if (e.ctrlKey || e.metaKey) {
-                // Zoom: Ctrl+scroll or pinch
-                barSpacing = Math.max(2, Math.min(40, barSpacing - e.deltaY * 0.02));
-            } else {
-                // Pan: scroll wheel or trackpad swipe
-                // deltaY > 0 (scroll down / swipe up) = pan right (later data)
-                // deltaX > 0 (swipe left) = pan right (later data)
-                const deltaBars = (e.deltaY + e.deltaX) / barSpacing;
-                scrollIndex += deltaBars;
-            }
-        }, { passive: false });
-
-        document.getElementById('sel-chart-type').addEventListener('change', (e) => {
-            chartType = e.target.value;
-            const names = { candle: 'Candlestick', ohlc: 'OHLC', line: 'Line', area: 'Area' };
-            document.getElementById('status').textContent = `${names[chartType]} • Canvas 2D`;
-        });
-
-        document.getElementById('btn-fit').addEventListener('click', () => {
-            scrollIndex = data.length;
-            barSpacing = 8;
-        });
-
-        // ── Start ────────────────────────────────────────────────
-        const status = document.getElementById('status');
-        status.textContent = 'Candlestick • Canvas 2D';
-        status.style.color = '#26a69a';
-        requestAnimationFrame(render);
+        run();
     </script>
 </body>
 

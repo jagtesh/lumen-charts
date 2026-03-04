@@ -2,15 +2,32 @@
 
 import init, * as wasm from './chart_wasm.js';
 
-export async function createChart(containerOrElement) {
-    if (!navigator.gpu) {
-        throw new Error("WebGPU not supported in this browser.");
-    }
+/**
+ * Create a chart in the given container.
+ *
+ * @param {HTMLElement} containerOrElement - The container element.
+ * @param {Object} [options] - Configuration options.
+ * @param {string} [options.renderer] - Renderer backend: 'webgpu', 'canvas2d', or 'webgl'.
+ *   Defaults to 'webgpu' if `navigator.gpu` is available, otherwise 'canvas2d'.
+ */
+export async function createChart(containerOrElement, options = {}) {
     await init();
-    await wasm.chart_start();
 
-    // The Rust code creates its own canvas named 'chart-canvas' 
-    // Wait for the rust-generated canvas to exist
+    const renderer = options.renderer || (navigator.gpu ? 'webgpu' : 'canvas2d');
+
+    if (renderer === 'webgpu') {
+        if (!navigator.gpu) {
+            throw new Error("WebGPU not supported. Use renderer: 'canvas2d' instead.");
+        }
+        await wasm.chart_start();
+    } else if (renderer === 'canvas2d') {
+        wasm.chart_start_canvas2d();
+    } else if (renderer === 'webgl') {
+        throw new Error("WebGL renderer not yet implemented.");
+    } else {
+        throw new Error(`Unknown renderer: '${renderer}'`);
+    }
+
     const canvas = document.getElementById('chart-canvas');
     if (canvas) {
         wireInteractions(canvas, wasm);
@@ -98,12 +115,13 @@ class ChartAPI {
     }
 
     addPane(heightStretch) {
-        const id = this.wasm.chart_add_pane(heightStretch);
-        return new PaneAPI(id);
+        // v5: returns pane index (not ID)
+        const index = this.wasm.chart_add_pane(heightStretch);
+        return new PaneAPI(index);
     }
 
     removePane(pane) {
-        this.wasm.chart_remove_pane(pane.id);
+        this.wasm.chart_remove_pane(pane.index);
     }
 
     timeScale() {
@@ -120,9 +138,13 @@ class ChartAPI {
     }
 }
 
+// v5: Pane identity is index-based (shifts when panes are removed)
 class PaneAPI {
-    constructor(id) {
-        this.id = id;
+    constructor(index) {
+        this.index = index;
+    }
+    paneIndex() {
+        return this.index;
     }
 }
 
@@ -194,7 +216,7 @@ class SeriesAPI {
 
         // Apply deferred pane assignment
         if (this._pendingPane !== null) {
-            this.wasm.chart_series_move_to_pane(this.id, this._pendingPane.id);
+            this.wasm.chart_series_move_to_pane(this.id, this._pendingPane.index);
             this._pendingPane = null;
         }
 
@@ -212,12 +234,31 @@ class SeriesAPI {
 
     moveToPane(pane) {
         if (this.id !== null) {
-            this.wasm.chart_series_move_to_pane(this.id, pane.id);
+            this.wasm.chart_series_move_to_pane(this.id, pane.index);
             this.wasm.chart_render_if_needed();
         } else {
             // Series not created yet — defer until setData() is called
             this._pendingPane = pane;
         }
+    }
+
+    // v5: ISeriesApi.getPane()
+    getPane() {
+        if (this.id === null) return null;
+        const idx = this.wasm.chart_series_get_pane_index(this.id);
+        return new PaneAPI(idx);
+    }
+
+    // v5: ISeriesApi.seriesOrder()
+    seriesOrder() {
+        if (this.id === null) return -1;
+        return this.wasm.chart_series_order(this.id);
+    }
+
+    // v5: ISeriesApi.setSeriesOrder(order)
+    setSeriesOrder(order) {
+        if (this.id === null) return false;
+        return this.wasm.chart_series_set_order(this.id, order);
     }
 }
 

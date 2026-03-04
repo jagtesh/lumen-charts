@@ -46,13 +46,24 @@ public struct HistogramData {
 
 // MARK: - Events
 
-/// Event payload delivered to click/crosshair handlers
+/// Event payload delivered to click/crosshair handlers.
+///
+/// # v5 `MouseEventParams` alignment
+///
+/// Includes `paneIndex` and `hoveredSeriesId` from v5's MouseEventParams.
+/// Per-series data is available via Chart.eventSeriesData() (pull-based).
 public struct ChartEvent {
     public let time: Int64
     public let price: Double
     public let pointX: Float
     public let pointY: Float
     public let logical: Double
+    /// v5: Index of the pane where the event occurred
+    public let paneIndex: UInt32
+    /// v5: ID of the series under the cursor (0 = none)
+    public let hoveredSeriesId: UInt32
+    /// v5: Number of series with data at this position
+    public let seriesCount: UInt32
 }
 
 // MARK: - Handles
@@ -63,9 +74,10 @@ public struct PriceLine {
     let seriesId: UInt32
 }
 
-/// Handle to a chart pane
+/// Handle to a chart pane (v5: index-based identity)
 public struct PaneHandle {
-    public let id: UInt32
+    /// The pane index (not a persistent ID — shifts when panes are removed)
+    public let index: UInt32
 }
 
 // MARK: - Series Type

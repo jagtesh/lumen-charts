@@ -6,11 +6,10 @@
 
 use wasm_bindgen::prelude::*;
 use vello::wgpu;
-use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
+use vello::{Renderer as VelloRenderer, RendererOptions};
 
 use lumen_charts::Chart;
 use lumen_charts::chart_model::ChartData;
-use lumen_charts::chart_state::ChartState;
 
 // Single global chart pointer (WASM is single-threaded, no need for thread_local)
 static mut CHART_PTR: *mut Chart = std::ptr::null_mut();
@@ -108,32 +107,18 @@ pub async fn chart_start() {
     )
     .expect("Failed to create Vello renderer");
 
+    // Create VelloRenderer from pre-created GPU resources
+    let pipeline = lumen_charts::renderers::VelloRenderer::new_from_parts(
+        device, queue, surface, surface_config, vello_renderer,
+    );
+
+    // Create Chart with the pipeline
+    let mut chart = Chart::new_with_renderer(Box::new(pipeline), width, height, scale_factor);
+
     // Generate sample data
     let bars = generate_sample_bars();
     log::info!("Generated {} sample bars", bars.len());
-
-    let data = ChartData { bars };
-    let state = ChartState::new(data, width as f32, height as f32, scale_factor);
-
-    let chart = Chart {
-        state,
-        backend: lumen_charts::backend_vello::VelloBackend::new(),
-        device,
-        queue,
-        surface,
-        surface_config,
-        vello_renderer,
-        cached_bottom_scene: None,
-        click_cb: None,
-        crosshair_move_cb: None,
-        dbl_click_cb: None,
-        visible_time_range_cb: None,
-        visible_logical_range_cb: None,
-        size_change_cb: None,
-        prev_visible_time_range: None,
-        prev_visible_logical_range: None,
-        prev_chart_size: None,
-    };
+    chart.state.data = ChartData { bars };
 
     // Store as raw pointer
     let chart_ptr = Box::into_raw(Box::new(chart));
@@ -144,6 +129,67 @@ pub async fn chart_start() {
     lumen_charts::chart_render(chart_ptr);
 
     log::info!("Chart rendered and interactive!");
+}
+
+/// Start a chart using Canvas 2D rendering (no WebGPU required).
+///
+/// This creates a Canvas2DRenderer — instant startup, no GPU adapter request.
+/// All interaction functions (scroll, zoom, pan, etc.) work identically.
+#[wasm_bindgen]
+pub fn chart_start_canvas2d() {
+    console_error_panic_hook::set_once();
+    console_log::init_with_level(log::Level::Info).ok();
+
+    log::info!("Chart WASM starting (Canvas 2D)...");
+
+    let window = web_sys::window().unwrap();
+    let document = window.document().unwrap();
+    let canvas = document
+        .get_element_by_id("chart-canvas")
+        .unwrap()
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .unwrap();
+
+    let width = canvas.client_width() as u32;
+    let height = canvas.client_height() as u32;
+    let scale_factor = window.device_pixel_ratio();
+
+    let physical_width = (width as f64 * scale_factor) as u32;
+    let physical_height = (height as f64 * scale_factor) as u32;
+    canvas.set_width(physical_width);
+    canvas.set_height(physical_height);
+
+    // Get 2D context — no wgpu, no adapter, instant
+    let ctx = canvas
+        .get_context("2d")
+        .unwrap()
+        .unwrap()
+        .dyn_into::<web_sys::CanvasRenderingContext2d>()
+        .unwrap();
+
+    // Create Canvas2D pipeline
+    let pipeline = lumen_charts::renderers::Canvas2DRenderer::new(ctx);
+
+    // Create Chart with Canvas2D renderer
+    let mut chart = Chart::new_with_renderer(Box::new(pipeline), width, height, scale_factor);
+
+    // Set scale factor on the renderer
+    chart.renderer.resize(width, height, scale_factor);
+
+    // Generate sample data
+    let bars = generate_sample_bars();
+    log::info!("Generated {} sample bars", bars.len());
+    chart.state.data = ChartData { bars };
+
+    // Store as raw pointer
+    let chart_ptr = Box::into_raw(Box::new(chart));
+    unsafe { CHART_PTR = chart_ptr; }
+
+    // Fit content + render
+    lumen_charts::chart_fit_content(chart_ptr);
+    lumen_charts::chart_render(chart_ptr);
+
+    log::info!("Canvas 2D chart rendered and interactive!");
 }
 
 // === Rendering ===

@@ -6,7 +6,7 @@
 //! - Mask coalescing (multiple interactions merge correctly)
 //! - Render counter accuracy
 
-use lumen_charts::backend_vello::VelloBackend;
+use lumen_charts::backends::VelloBackend;
 use lumen_charts::chart_model::{ChartData, OhlcBar};
 use lumen_charts::chart_renderer::{render_bottom_scene, render_crosshair_scene};
 use lumen_charts::chart_state::ChartState;

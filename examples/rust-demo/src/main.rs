@@ -3,17 +3,21 @@
 //! Cross-platform demo using winit + wgpu + egui.
 //! Showcases chart type switching, overlay, and MACD indicator.
 //!
+//! **Migrated to lumen-charts-sdk** — all chart interactions use the safe v5 API.
+//! No unsafe blocks needed for chart operations.
+//!
 //! Keyboard shortcuts (in addition to egui toolbar):
 //!   1-6  Switch chart type (OHLC, Candle, Line, Area, Hist, Baseline)
 //!   F    Fit content
 //!   O    Toggle overlay
 //!   M    Toggle MACD
-#![allow(unused_unsafe)]
 
-use lumen_charts::chart_model::OhlcBar;
+use lumen_charts::renderers::VelloRenderer;
 use lumen_charts::sample_data::sample_data;
-use lumen_charts::series::{HistogramDataPoint, LineDataPoint};
-use lumen_charts::Chart;
+use lumen_charts_sdk::{
+    ChartApi, Color, HistogramDataPoint, LineDataPoint, OhlcBar, PaneApi, SeriesApi,
+    SeriesDefinition,
+};
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -78,9 +82,9 @@ fn calculate_macd(bars: &[OhlcBar]) -> MacdData {
         });
 
         let color = if hist >= 0.0 {
-            Some([0.16, 0.76, 0.49, 0.8f32])
+            Some(Color([0.16, 0.76, 0.49, 0.8f32]))
         } else {
-            Some([0.94, 0.27, 0.27, 0.8f32])
+            Some(Color([0.94, 0.27, 0.27, 0.8f32]))
         };
         histogram.push(HistogramDataPoint {
             time,
@@ -111,7 +115,7 @@ const SERIES_TYPES: [&str; 6] = [
 
 struct AppState {
     window: Arc<Window>,
-    chart: Chart,
+    chart: ChartApi,
     // egui integration
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
@@ -119,10 +123,10 @@ struct AppState {
     // Chart state
     current_series_type: usize,
     overlay_active: bool,
-    overlay_series_id: Option<u32>,
+    overlay_series: Option<SeriesApi>,
     macd_active: bool,
-    macd_pane_id: Option<u32>,
-    macd_series_ids: Vec<u32>,
+    macd_pane: Option<PaneApi>,
+    macd_series: Vec<SeriesApi>,
     // Cached sample data
     sample_bars: Vec<OhlcBar>,
     // Mouse tracking
@@ -132,14 +136,13 @@ struct AppState {
 
 impl AppState {
     fn toggle_overlay(&mut self) {
-        if let Some(id) = self.overlay_series_id.take() {
-            unsafe {
-                let ptr = &mut self.chart as *mut Chart;
-                lumen_charts::chart_remove_series(ptr, id);
-                lumen_charts::chart_render(ptr);
-            }
+        if let Some(series) = self.overlay_series.take() {
+            // Remove the overlay series — safe, no unsafe needed
+            self.chart.remove_series(&series);
+            self.chart.render();
             self.overlay_active = false;
         } else {
+            // Create an area overlay offset below the main price
             let overlay_data: Vec<LineDataPoint> = self
                 .sample_bars
                 .iter()
@@ -148,117 +151,71 @@ impl AppState {
                     value: b.close - 15.0,
                 })
                 .collect();
-            let times: Vec<i64> = overlay_data.iter().map(|d| d.time).collect();
-            let values: Vec<f64> = overlay_data.iter().map(|d| d.value).collect();
-            unsafe {
-                let ptr = &mut self.chart as *mut Chart;
-                let id = lumen_charts::chart_add_area_series(
-                    ptr,
-                    times.as_ptr(),
-                    values.as_ptr(),
-                    overlay_data.len() as u32,
-                );
-                self.overlay_series_id = Some(id);
-                lumen_charts::chart_render(ptr);
-            }
+
+            // v5 unified addSeries API — no unsafe!
+            let series = self.chart.add_series(SeriesDefinition::Area);
+            series.set_line_data(&mut self.chart, &overlay_data);
+            self.overlay_series = Some(series);
+            self.chart.render();
             self.overlay_active = true;
         }
     }
 
     fn toggle_macd(&mut self) {
-        if let Some(pane_id) = self.macd_pane_id.take() {
-            unsafe {
-                let ptr = &mut self.chart as *mut Chart;
-                for &id in &self.macd_series_ids {
-                    lumen_charts::chart_remove_series(ptr, id);
-                }
-                lumen_charts::chart_remove_pane(ptr, pane_id);
-                lumen_charts::chart_render(ptr);
+        if let Some(pane) = self.macd_pane.take() {
+            // Remove all MACD series and the pane — safe SDK calls
+            for series in &self.macd_series {
+                self.chart.remove_series(series);
             }
-            self.macd_series_ids.clear();
+            self.chart.remove_pane(&pane);
+            self.macd_series.clear();
+            self.chart.render();
             self.macd_active = false;
         } else {
             let macd = calculate_macd(&self.sample_bars);
-            unsafe {
-                let ptr = &mut self.chart as *mut Chart;
-                let pane_id = lumen_charts::chart_add_pane(ptr, 0.3);
-                self.macd_pane_id = Some(pane_id);
 
-                // Histogram
-                let h_times: Vec<i64> = macd.histogram.iter().map(|d| d.time).collect();
-                let h_values: Vec<f64> = macd.histogram.iter().map(|d| d.value).collect();
-                let h_colors: Vec<u32> = macd
-                    .histogram
-                    .iter()
-                    .map(|d| {
-                        let c = d.color.unwrap_or([0.5, 0.5, 0.5, 1.0]);
-                        let r = (c[0] * 255.0) as u32;
-                        let g = (c[1] * 255.0) as u32;
-                        let b = (c[2] * 255.0) as u32;
-                        let a = (c[3] * 255.0) as u32;
-                        (r << 24) | (g << 16) | (b << 8) | a
-                    })
-                    .collect();
-                let hist_id = lumen_charts::chart_add_histogram_series(
-                    ptr,
-                    h_times.as_ptr(),
-                    h_values.as_ptr(),
-                    h_colors.as_ptr(),
-                    macd.histogram.len() as u32,
-                );
-                lumen_charts::chart_series_move_to_pane(ptr, hist_id, pane_id);
+            // Add a sub-pane for MACD (30% height)
+            let pane = self.chart.add_pane(0.3);
 
-                // MACD line (blue)
-                let m_times: Vec<i64> = macd.macd_line.iter().map(|d| d.time).collect();
-                let m_values: Vec<f64> = macd.macd_line.iter().map(|d| d.value).collect();
-                let macd_line_id = lumen_charts::chart_add_line_series(
-                    ptr,
-                    m_times.as_ptr(),
-                    m_values.as_ptr(),
-                    macd.macd_line.len() as u32,
-                );
-                lumen_charts::chart_series_move_to_pane(ptr, macd_line_id, pane_id);
-                // Apply blue color
-                let opts = r#"{"color":[0.2,0.6,1.0,1.0],"lineWidth":1.5}"#;
-                let c_str = std::ffi::CString::new(opts).unwrap();
-                lumen_charts::chart_series_apply_options(ptr, macd_line_id, c_str.as_ptr());
+            // Histogram series
+            let hist_series = self.chart.add_series(SeriesDefinition::Histogram);
+            hist_series.set_histogram_data(&mut self.chart, &macd.histogram);
+            hist_series.move_to_pane(&mut self.chart, &pane);
 
-                // Signal line (orange)
-                let s_times: Vec<i64> = macd.signal_line.iter().map(|d| d.time).collect();
-                let s_values: Vec<f64> = macd.signal_line.iter().map(|d| d.value).collect();
-                let signal_id = lumen_charts::chart_add_line_series(
-                    ptr,
-                    s_times.as_ptr(),
-                    s_values.as_ptr(),
-                    macd.signal_line.len() as u32,
-                );
-                lumen_charts::chart_series_move_to_pane(ptr, signal_id, pane_id);
-                let opts = r#"{"color":[1.0,0.6,0.2,1.0],"lineWidth":1.5}"#;
-                let c_str = std::ffi::CString::new(opts).unwrap();
-                lumen_charts::chart_series_apply_options(ptr, signal_id, c_str.as_ptr());
+            // MACD line (blue)
+            let macd_line_series = self.chart.add_series(SeriesDefinition::Line);
+            macd_line_series.set_line_data(&mut self.chart, &macd.macd_line);
+            macd_line_series.move_to_pane(&mut self.chart, &pane);
+            macd_line_series.apply_options(
+                &mut self.chart,
+                r#"{"color":[0.2,0.6,1.0,1.0],"lineWidth":1.5}"#,
+            );
 
-                self.macd_series_ids = vec![hist_id, macd_line_id, signal_id];
-                lumen_charts::chart_render(ptr);
-            }
+            // Signal line (orange)
+            let signal_series = self.chart.add_series(SeriesDefinition::Line);
+            signal_series.set_line_data(&mut self.chart, &macd.signal_line);
+            signal_series.move_to_pane(&mut self.chart, &pane);
+            signal_series.apply_options(
+                &mut self.chart,
+                r#"{"color":[1.0,0.6,0.2,1.0],"lineWidth":1.5}"#,
+            );
+
+            self.macd_pane = Some(pane);
+            self.macd_series = vec![hist_series, macd_line_series, signal_series];
+            self.chart.render();
             self.macd_active = true;
         }
     }
 
     fn set_series_type(&mut self, type_idx: usize) {
         self.current_series_type = type_idx;
-        unsafe {
-            let ptr = &mut self.chart as *mut Chart;
-            lumen_charts::chart_set_series_type(ptr, type_idx as u32);
-            lumen_charts::chart_render(ptr);
-        }
+        self.chart.set_series_type(type_idx as u32);
+        self.chart.render();
     }
 
     fn fit_content(&mut self) {
-        unsafe {
-            let ptr = &mut self.chart as *mut Chart;
-            lumen_charts::chart_fit_content(ptr);
-            lumen_charts::chart_render(ptr);
-        }
+        self.chart.fit_content();
+        self.chart.render();
     }
 
     fn render_egui_and_chart(&mut self) {
@@ -296,40 +253,49 @@ impl AppState {
         self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);
 
+        // --- Downcast renderer to VelloRenderer for wgpu access ---
+        // We access the inner Chart directly to split-borrow renderer vs state.
+        let inner = &mut self.chart.inner;
+        let pipeline = inner
+            .renderer
+            .as_any_mut()
+            .downcast_mut::<VelloRenderer>()
+            .expect("Rust demo requires VelloRenderer renderer");
+
         // --- Single surface acquire ---
-        let surface_texture = match self.chart.surface.get_current_texture() {
+        let surface_texture = match pipeline.surface.get_current_texture() {
             Ok(t) => t,
             Err(_) => return,
         };
 
         // --- Render chart via Vello (bypasses chart_render to avoid double-acquire) ---
         {
-            use lumen_charts::backend_vello::VelloBackend;
+            use lumen_charts::backends::VelloBackend;
             use lumen_charts::chart_renderer::{render_bottom_scene, render_crosshair_scene};
 
-            self.chart.backend.reset();
+            pipeline.backend.reset();
 
             let mut bottom_backend = VelloBackend::new();
-            render_bottom_scene(&mut bottom_backend, &self.chart.state);
+            render_bottom_scene(&mut bottom_backend, &inner.state);
             let bottom_scene = bottom_backend.scene;
-            self.chart.backend.scene_mut().append(&bottom_scene, None);
-            self.chart.cached_bottom_scene = Some(bottom_scene);
+            pipeline.backend.scene_mut().append(&bottom_scene, None);
+            pipeline.cached_bottom_scene = Some(bottom_scene);
 
-            render_crosshair_scene(&mut self.chart.backend, &self.chart.state);
+            render_crosshair_scene(&mut pipeline.backend, &inner.state);
 
             let render_params = vello::RenderParams {
                 base_color: vello::peniko::Color::BLACK,
-                width: self.chart.surface_config.width,
-                height: self.chart.surface_config.height,
+                width: pipeline.surface_config.width,
+                height: pipeline.surface_config.height,
                 antialiasing_method: vello::AaConfig::Area,
             };
 
-            self.chart
+            pipeline
                 .vello_renderer
                 .render_to_surface(
-                    &self.chart.device,
-                    &self.chart.queue,
-                    self.chart.backend.scene(),
+                    &pipeline.device,
+                    &pipeline.queue,
+                    pipeline.backend.scene(),
                     &surface_texture,
                     &render_params,
                 )
@@ -344,8 +310,8 @@ impl AppState {
 
             let screen_descriptor = egui_wgpu::ScreenDescriptor {
                 size_in_pixels: [
-                    self.chart.surface_config.width,
-                    self.chart.surface_config.height,
+                    pipeline.surface_config.width,
+                    pipeline.surface_config.height,
                 ],
                 pixels_per_point: self.scale_factor as f32,
             };
@@ -356,23 +322,23 @@ impl AppState {
 
             for (id, image_delta) in &full_output.textures_delta.set {
                 self.egui_renderer.update_texture(
-                    &self.chart.device,
-                    &self.chart.queue,
+                    &pipeline.device,
+                    &pipeline.queue,
                     *id,
                     image_delta,
                 );
             }
 
             let mut encoder =
-                self.chart
+                pipeline
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("egui-encoder"),
                     });
 
             self.egui_renderer.update_buffers(
-                &self.chart.device,
-                &self.chart.queue,
+                &pipeline.device,
+                &pipeline.queue,
                 &mut encoder,
                 &clipped_primitives,
                 &screen_descriptor,
@@ -398,7 +364,7 @@ impl AppState {
                 );
             }
 
-            self.chart.queue.submit(std::iter::once(encoder.finish()));
+            pipeline.queue.submit(std::iter::once(encoder.finish()));
 
             for id in &full_output.textures_delta.free {
                 self.egui_renderer.free_texture(id);
@@ -440,31 +406,18 @@ impl ApplicationHandler for App {
         });
         let surface = instance.create_surface(window.clone()).unwrap();
 
-        // Create chart from the instance + surface
+        // Create VelloRenderer and Chart via SDK
         let logical_w = (size.width as f64 / scale_factor) as u32;
         let logical_h = (size.height as f64 / scale_factor) as u32;
-        let mut chart =
-            Chart::new_from_surface(instance, surface, logical_w, logical_h, scale_factor);
+        let pipeline = VelloRenderer::new(instance, surface, logical_w, logical_h, scale_factor);
 
-        // Load sample data
-        let bars = sample_data();
-        let flat: Vec<f64> = bars
-            .iter()
-            .flat_map(|b| vec![b.time as f64, b.open, b.high, b.low, b.close])
-            .collect();
-        unsafe {
-            let ptr = &mut chart as *mut Chart;
-            lumen_charts::chart_set_data(ptr, flat.as_ptr(), bars.len() as u32);
-            lumen_charts::chart_fit_content(ptr);
-            lumen_charts::chart_render(ptr);
-        }
+        // Need device/format before moving pipeline into Chart
+        let surface_format = pipeline.surface_config.format;
+        let device_ref = &pipeline.device;
 
-        // Set up egui
+        // Create egui renderer before pipeline moves into Chart
         let egui_ctx = egui::Context::default();
-
-        // Style: dark mode
         egui_ctx.set_visuals(egui::Visuals::dark());
-
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
@@ -473,9 +426,17 @@ impl ApplicationHandler for App {
             None,
             None,
         );
+        let egui_renderer = egui_wgpu::Renderer::new(device_ref, surface_format, None, 1, false);
 
-        let egui_renderer =
-            egui_wgpu::Renderer::new(&chart.device, chart.surface_config.format, None, 1, false);
+        // Create ChartApi via SDK — wraps Chart with safe v5 methods
+        let mut chart =
+            ChartApi::with_renderer(Box::new(pipeline), logical_w, logical_h, scale_factor);
+
+        // Load sample data using safe SDK
+        let bars = sample_data();
+        chart.set_data(bars.clone());
+        chart.fit_content();
+        chart.render();
 
         self.state = Some(AppState {
             window,
@@ -485,10 +446,10 @@ impl ApplicationHandler for App {
             egui_renderer,
             current_series_type: 0,
             overlay_active: false,
-            overlay_series_id: None,
+            overlay_series: None,
             macd_active: false,
-            macd_pane_id: None,
-            macd_series_ids: Vec::new(),
+            macd_pane: None,
+            macd_series: Vec::new(),
             sample_bars: bars,
             cursor_pos: (0.0, 0.0),
             scale_factor,
@@ -516,10 +477,7 @@ impl ApplicationHandler for App {
                 if size.width > 0 && size.height > 0 {
                     let logical_w = (size.width as f64 / state.scale_factor) as u32;
                     let logical_h = (size.height as f64 / state.scale_factor) as u32;
-                    unsafe {
-                        let ptr = &mut state.chart as *mut Chart;
-                        lumen_charts::chart_resize(ptr, logical_w, logical_h, state.scale_factor);
-                    }
+                    state.chart.resize(logical_w, logical_h, state.scale_factor);
                     state.window.request_redraw();
                 }
             }
@@ -527,7 +485,6 @@ impl ApplicationHandler for App {
                 state.scale_factor = scale_factor;
             }
             WindowEvent::RedrawRequested => {
-                // Render chart, then egui overlay
                 state.render_egui_and_chart();
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -535,11 +492,8 @@ impl ApplicationHandler for App {
                     let x = (position.x / state.scale_factor) as f32;
                     let y = (position.y / state.scale_factor) as f32;
                     state.cursor_pos = (x, y);
-                    unsafe {
-                        let ptr = &mut state.chart as *mut Chart;
-                        if lumen_charts::chart_pointer_move(ptr, x, y) {
-                            state.window.request_redraw();
-                        }
+                    if state.chart.pointer_move(x, y) {
+                        state.window.request_redraw();
                     }
                 }
             }
@@ -550,15 +504,12 @@ impl ApplicationHandler for App {
             } => {
                 if !egui_wants_input {
                     let (x, y) = state.cursor_pos;
-                    unsafe {
-                        let ptr = &mut state.chart as *mut Chart;
-                        let redraw = match btn_state {
-                            ElementState::Pressed => lumen_charts::chart_pointer_down(ptr, x, y, 0),
-                            ElementState::Released => lumen_charts::chart_pointer_up(ptr, x, y, 0),
-                        };
-                        if redraw {
-                            state.window.request_redraw();
-                        }
+                    let redraw = match btn_state {
+                        ElementState::Pressed => state.chart.pointer_down(x, y, 0),
+                        ElementState::Released => state.chart.pointer_up(x, y, 0),
+                    };
+                    if redraw {
+                        state.window.request_redraw();
                     }
                 }
             }
@@ -568,21 +519,15 @@ impl ApplicationHandler for App {
                         MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0),
                         MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
                     };
-                    unsafe {
-                        let ptr = &mut state.chart as *mut Chart;
-                        if lumen_charts::chart_scroll(ptr, -dx, dy) {
-                            state.window.request_redraw();
-                        }
+                    if state.chart.scroll(-dx, dy) {
+                        state.window.request_redraw();
                     }
                 }
             }
             WindowEvent::CursorLeft { .. } => {
                 if !egui_wants_input {
-                    unsafe {
-                        let ptr = &mut state.chart as *mut Chart;
-                        if lumen_charts::chart_pointer_leave(ptr) {
-                            state.window.request_redraw();
-                        }
+                    if state.chart.pointer_leave() {
+                        state.window.request_redraw();
                     }
                 }
             }
@@ -599,7 +544,6 @@ impl ApplicationHandler for App {
                         PhysicalKey::Code(KeyCode::KeyO) => state.toggle_overlay(),
                         PhysicalKey::Code(KeyCode::KeyM) => state.toggle_macd(),
                         _ => {
-                            // Map arrow keys etc to chart key_down
                             let key_map: &[(KeyCode, u32)] = &[
                                 (KeyCode::ArrowLeft, 37),
                                 (KeyCode::ArrowRight, 39),
@@ -614,11 +558,8 @@ impl ApplicationHandler for App {
                                 if let Some((_, chart_code)) =
                                     key_map.iter().find(|(k, _)| *k == code)
                                 {
-                                    unsafe {
-                                        let ptr = &mut state.chart as *mut Chart;
-                                        if lumen_charts::chart_key_down(ptr, *chart_code) {
-                                            state.window.request_redraw();
-                                        }
+                                    if state.chart.key_down(*chart_code) {
+                                        state.window.request_redraw();
                                     }
                                 }
                             }

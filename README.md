@@ -5,8 +5,9 @@ GPU-accelerated charting library built on [Vello](https://github.com/linebender/
 The API is designed to stay as close to the original Lightweight Charts API as
 possible, making migration straightforward:
 
+- **Rust SDK** — safe, idiomatic Rust API on the `Chart` struct (no unsafe needed)
 - **Swift SDK** — native API for macOS and iOS (via Metal)
-- **JavaScript API** — available for the WASM target
+- **JavaScript API** — available for the WASM target (WebGPU or Canvas 2D)
 - **Windows / Linux** — no high-level SDK yet; use the C-ABI directly
   (see [Platform Support](#platform-support))
 
@@ -81,10 +82,16 @@ This produces a `pkg/` directory you can import in your JavaScript:
 
 ```javascript
 import { createChart } from './pkg/chart_api.js';
+
+// WebGPU (default, auto-falls back to Canvas 2D if unavailable)
 const chart = await createChart(document.getElementById('container'));
+
+// Explicit Canvas 2D (works in any browser, no WebGPU required)
+const chart = await createChart(document.getElementById('container'), { renderer: 'canvas2d' });
 ```
 
-> Requires a browser with WebGPU support (Chrome 113+, Safari 18+).
+Available renderers: `'webgpu'` (default), `'canvas2d'`. If `'webgpu'` is requested
+but unavailable, the SDK automatically falls back to `'canvas2d'`.
 
 ### C / C++ / Other Languages
 
@@ -124,6 +131,7 @@ make rust-demo    # builds core + runs cross-platform winit/egui demo
 ```
 
 > Features: chart type switching, overlay, MACD indicator, egui toolbar. Works on macOS, Windows, and Linux.
+> Uses the safe Rust SDK — see [Rust SDK](#rust-sdk) below.
 
 ### Run the WebGPU Demo
 
@@ -136,10 +144,10 @@ make webgpu-demo  # builds WASM SDK → starts local server at http://localhost:
 ### Run the Canvas 2D Demo
 
 ```bash
-make web-canvas-demo  # starts server at http://localhost:8081 (no build needed)
+make web-canvas-demo  # builds WASM SDK → starts server at http://localhost:8081
 ```
 
-> Works in any browser — no WebGPU required.
+> Works in any browser — no WebGPU required. Uses `createChart(el, { renderer: 'canvas2d' })`.
 
 ### Run Tests
 
@@ -149,7 +157,7 @@ make test         # runs all 292 tests (unit + integration + parity + C-ABI + Dr
 
 ## Architecture
 
-The **core** is a platform-agnostic Rust library that exposes a C-ABI. It handles:
+The **core** is a platform-agnostic Rust library that exposes both a safe Rust API and a C-ABI. It handles:
 - OHLC, Candlestick, Line, Area, Baseline, Histogram series
 - Time scale with zoom, scroll, and fit-to-content
 - Price scale with auto-range and percentage mode
@@ -157,28 +165,56 @@ The **core** is a platform-agnostic Rust library that exposes a C-ABI. It handle
 - Crosshair, price lines, and event system
 - Invalidation-driven rendering (only redraws when state changes)
 
-### Rendering Backends
+### Renderer Abstraction
 
-All chart rendering goes through a `DrawBackend` trait with static dispatch
-(`impl DrawBackend`), enabling zero-cost backend selection at compile time.
+The `Chart` struct holds a `Box<dyn Renderer>` — it never touches hardware directly.
+All rendering goes through two layers:
+
+1. **`Renderer` trait** — owns hardware resources, handles render + present
+2. **`DrawBackend` trait** — compile-time dispatched drawing primitives
+
 The chart renderer is completely backend-agnostic — no Vello, Canvas, or OpenGL
 code exists in the rendering logic.
 
-| Backend | Engine | Best For |
+| Renderer | Engine | Best For |
 |---|---|---|
-| **Vello** (default) | wgpu — WebGPU, Metal, Vulkan, DX12 | High-performance GPU rendering |
-| **femtovg** | glow — WebGL2, OpenGL ES | Broad compatibility, no compute shader requirement |
-| **Canvas 2D** | `web_sys` — browser Canvas API | Universal browser fallback (WASM only) |
+| **`VelloRenderer`** (default) | wgpu — WebGPU, Metal, Vulkan, DX12 | High-performance GPU rendering |
+| **`Canvas2DRenderer`** | `web_sys` — browser Canvas API | Universal browser fallback (WASM only) |
+| **`FemtovgRenderer`** (planned) | glow — WebGL2, OpenGL ES | Broad compatibility, no compute shader requirement |
 
-> femtovg runs on **native** (desktop OpenGL via glow) as well as WASM (WebGL2),
+> femtovg will run on **native** (desktop OpenGL via glow) as well as WASM (WebGL2),
 > making it a cross-platform alternative to Vello on systems where GPU compute
 > shaders aren't available.
 
-**SDKs** wrap the C-ABI with idiomatic, type-safe APIs for each platform:
+**SDKs** wrap the core with idiomatic, type-safe APIs for each platform:
+- **Rust SDK** — safe methods directly on `Chart` (render, resize, pointer_move, etc.)
 - **Swift SDK** — native Swift classes wrapping the C-ABI, with MetalLayer integration
-- **WASM SDK** — `wasm-bindgen` zero-cost passthrough + `chart_api.js` wrapper
+- **WASM SDK** — `wasm-bindgen` passthrough + `chart_api.js` wrapper with renderer selection
 
 **Examples** are runnable demos that showcase the SDK usage.
+
+### Rust SDK
+
+The `Chart` struct provides safe, idiomatic methods — no `unsafe` or raw pointers:
+
+```rust
+use lumen_charts::{Chart, backend_vello::VelloRenderer, sample_data::sample_data};
+
+// Create a renderer and chart
+let renderer = VelloRenderer::new(instance, surface, width, height, scale);
+let mut chart = Chart::new_with_renderer(Box::new(renderer), width, height, scale);
+
+// Load data and interact
+chart.set_data(sample_data());
+chart.fit_content();
+chart.render();
+
+// Event handling
+if chart.pointer_move(x, y) { /* redraw */ }
+if chart.scroll(dx, dy) { /* redraw */ }
+chart.resize(new_w, new_h, scale);
+chart.set_series_type(1); // Candlestick
+```
 
 ## API Completeness
 

@@ -70,6 +70,9 @@ fn test_chart_event_callback_abi_compat() {
         point_x: 100.0,
         point_y: 200.0,
         price: 150.50,
+        pane_index: 0,
+        hovered_series_id: 0,
+        series_count: 0,
     };
 
     let cb: lumen_charts::ChartEventCallback = test_event_callback;
@@ -86,6 +89,9 @@ fn test_chart_event_param_layout() {
         point_x: 100.0,
         point_y: 200.0,
         price: 150.50,
+        pane_index: 0,
+        hovered_series_id: 0,
+        series_count: 0,
     };
 
     assert_eq!(param.time, 1704153600);
@@ -93,6 +99,9 @@ fn test_chart_event_param_layout() {
     assert!((param.point_x - 100.0).abs() < f32::EPSILON);
     assert!((param.point_y - 200.0).abs() < f32::EPSILON);
     assert!((param.price - 150.50).abs() < f64::EPSILON);
+    assert_eq!(param.pane_index, 0);
+    assert_eq!(param.hovered_series_id, 0);
+    assert_eq!(param.series_count, 0);
 
     // Verify struct is #[repr(C)] — field order and alignment must match C
     assert_eq!(
@@ -101,7 +110,11 @@ fn test_chart_event_param_layout() {
             + std::mem::size_of::<f64>()    // logical
             + std::mem::size_of::<f32>()    // point_x
             + std::mem::size_of::<f32>()    // point_y
-            + std::mem::size_of::<f64>(), // price
+            + std::mem::size_of::<f64>()    // price
+            + std::mem::size_of::<u32>()    // pane_index
+            + std::mem::size_of::<u32>()    // hovered_series_id
+            + std::mem::size_of::<u32>()    // series_count
+            + 4, // padding for alignment
         "ChartEventParam should be tightly packed as #[repr(C)]"
     );
 }

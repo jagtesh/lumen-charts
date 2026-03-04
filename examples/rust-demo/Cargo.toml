@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 lumen-charts = { path = "../../core" }
+lumen-charts-sdk = { path = "../../sdks/rust" }
 vello = "0.4"
 winit = "0.30"
 wgpu = "23"

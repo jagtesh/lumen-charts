@@ -98,14 +98,33 @@ public class SeriesAPI {
         chart_series_remove_price_line(chartPtr, id, line.id)
     }
 
-    // MARK: - Pane
+    // MARK: - Pane (v5: index-based)
 
     /// Move this series to a different pane
     public func moveToPane(_ pane: PaneHandle) {
-        chart_series_move_to_pane(chartPtr, id, pane.id)
+        chart_series_move_to_pane(chartPtr, id, pane.index)
     }
 
-    // MARK: - Read APIs
+    /// Get the pane index this series is assigned to (v5: ISeriesApi.getPane)
+    public var paneIndex: UInt32 {
+        chart_series_get_pane_index(chartPtr, id)
+    }
+
+    /// Get a PaneHandle for the pane this series belongs to
+    public func getPane() -> PaneHandle {
+        PaneHandle(index: paneIndex)
+    }
+
+    /// Get the z-order of this series within its pane (v5: seriesOrder)
+    public func seriesOrder() -> UInt32 {
+        chart_series_order(chartPtr, id)
+    }
+
+    /// Set the z-order of this series within its pane (v5: setSeriesOrder)
+    @discardableResult
+    public func setSeriesOrder(_ order: UInt32) -> Bool {
+        chart_series_set_order(chartPtr, id, order)
+    }
 
     /// Number of data points in this series
     public var dataLength: UInt32 {

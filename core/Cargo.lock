@@ -869,6 +869,7 @@ dependencies = [
  "chrono",
  "env_logger",
  "femtovg",
+ "js-sys",
  "log",
  "parley",
  "pollster",

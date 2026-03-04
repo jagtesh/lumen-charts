@@ -1,8 +1,4 @@
-#[cfg(target_arch = "wasm32")]
-pub mod backend_canvas2d;
-#[cfg(feature = "femtovg-backend")]
-pub mod backend_femtovg;
-pub mod backend_vello;
+pub mod backends;
 pub mod chart_model;
 pub mod chart_options;
 pub mod chart_renderer;
@@ -14,6 +10,7 @@ pub mod formatters;
 pub mod invalidation;
 pub mod overlays;
 pub mod price_scale;
+pub mod renderers;
 pub mod sample_data;
 pub mod scale;
 pub mod series;
@@ -26,13 +23,12 @@ pub mod time_scale;
 // ---------------------------------------------------------------------------
 use std::ffi::c_void;
 
-use crate::backend_vello::VelloBackend;
 use crate::chart_model::ChartData;
-use crate::chart_renderer::{render_bottom_scene, render_crosshair_scene};
 use crate::chart_state::ChartState;
+use crate::renderers::Renderer;
+use crate::renderers::VelloRenderer;
 
 use vello::wgpu;
-use vello::{AaConfig, Renderer as VelloRenderer, RendererOptions, Scene};
 
 use wgpu::rwh;
 
@@ -57,6 +53,17 @@ pub enum ChartViewKind {
     Wayland = 3,
 }
 
+/// C-ABI event data passed to click/crosshair/dbl-click callbacks.
+///
+/// # v5 `MouseEventParams` alignment
+///
+/// In v5, `MouseEventParams` includes `paneIndex`, `hoveredSeries`, and a
+/// `seriesData` map. For C-ABI we can't embed a Map, so we use a pull-based
+/// companion accessor (`chart_event_series_data`) instead of embedding
+/// series data directly. This avoids:
+///   - JSON parse overhead on the ~60fps crosshair move hot path
+///   - Memory management burden (no strings to free)
+///   - Computing series data when consumers don't need it
 #[repr(C)]
 pub struct ChartEventParam {
     pub time: i64,
@@ -64,6 +71,12 @@ pub struct ChartEventParam {
     pub point_x: f32,
     pub point_y: f32,
     pub price: f64,
+    /// Index of the pane where the event occurred (v5: paneIndex)
+    pub pane_index: u32,
+    /// ID of the series under the cursor, or 0 if none (v5: hoveredSeries)
+    pub hovered_series_id: u32,
+    /// Number of series with data at this crosshair position
+    pub series_count: u32,
 }
 
 pub type ChartEventCallback = extern "C" fn(param: *const ChartEventParam, user_data: *mut c_void);
@@ -74,20 +87,14 @@ pub type RangeChangeCallback = extern "C" fn(from: f64, to: f64, user_data: *mut
 /// Callback for size change events: fires with (width, height).
 pub type SizeChangeCallback = extern "C" fn(width: f32, height: f32, user_data: *mut c_void);
 
-/// Chart handle containing GPU context and chart state.
-/// Fields are public to allow platform-specific initialization (e.g., WASM canvas).
+/// Chart handle — owns state + a renderer pipeline.
+///
+/// The renderer is a `Box<dyn Renderer>` that encapsulates all hardware-specific
+/// resources (GPU device, surface, Canvas2D context, etc.). The Chart struct
+/// never directly touches hardware — only the renderer does.
 pub struct Chart {
     pub state: ChartState,
-    pub backend: VelloBackend,
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-    pub surface: wgpu::Surface<'static>,
-    pub surface_config: wgpu::SurfaceConfiguration,
-    pub vello_renderer: VelloRenderer,
-
-    /// Cached bottom scene (background + grid + series + axes).
-    /// Reused when only the crosshair changes.
-    pub cached_bottom_scene: Option<Scene>,
+    pub renderer: Box<dyn Renderer>,
 
     pub click_cb: Option<(ChartEventCallback, *mut c_void)>,
     pub crosshair_move_cb: Option<(ChartEventCallback, *mut c_void)>,
@@ -105,26 +112,12 @@ pub struct Chart {
 }
 
 impl Chart {
-    /// Create a Chart from a pre-created wgpu instance and surface.
+    /// Create a Chart with any renderer. This is the only constructor.
     ///
-    /// This is the Rust-native entry point — Rust consumers (e.g. the winit
-    /// demo) create their own `wgpu::Instance` and `wgpu::Surface`, then
-    /// pass both here. The library never creates wgpu resources on its own.
-    pub fn new_from_surface(
-        instance: wgpu::Instance,
-        surface: wgpu::Surface<'static>,
-        width: u32,
-        height: u32,
-        scale_factor: f64,
-    ) -> Self {
-        Self::init_with_surface(instance, surface, width, height, scale_factor)
-    }
-
-    /// Shared initialization: given a wgpu instance and surface, set up the
-    /// adapter, device, Vello renderer, and return a ready-to-render Chart.
-    fn init_with_surface(
-        instance: wgpu::Instance,
-        surface: wgpu::Surface<'static>,
+    /// The caller creates the appropriate `Renderer` implementation
+    /// (e.g. `VelloRenderer`, `Canvas2DRenderer`) and passes it here.
+    pub fn new_with_renderer(
+        renderer: Box<dyn Renderer>,
         width: u32,
         height: u32,
         scale_factor: f64,
@@ -132,65 +125,9 @@ impl Chart {
         let data = ChartData { bars: Vec::new() };
         let state = ChartState::new(data, width as f32, height as f32, scale_factor);
 
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        }))
-        .expect("Failed to find a suitable GPU adapter");
-
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("chart-device"),
-                ..Default::default()
-            },
-            None,
-        ))
-        .expect("Failed to create GPU device");
-
-        let surface_caps = surface.get_capabilities(&adapter);
-        let format = surface_caps
-            .formats
-            .iter()
-            .find(|f| !f.is_srgb())
-            .copied()
-            .unwrap_or(surface_caps.formats[0]);
-
-        let physical_width = (width as f64 * scale_factor) as u32;
-        let physical_height = (height as f64 * scale_factor) as u32;
-
-        let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            width: physical_width.max(1),
-            height: physical_height.max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
-            alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-        surface.configure(&device, &surface_config);
-
-        let vello_renderer = VelloRenderer::new(
-            &device,
-            RendererOptions {
-                surface_format: Some(format),
-                use_cpu: false,
-                antialiasing_support: vello::AaSupport::area_only(),
-                num_init_threads: None,
-            },
-        )
-        .expect("Failed to create Vello renderer");
-
         Chart {
             state,
-            backend: backend_vello::VelloBackend::new(),
-            device,
-            queue,
-            surface,
-            surface_config,
-            vello_renderer,
-            cached_bottom_scene: None,
+            renderer,
             click_cb: None,
             crosshair_move_cb: None,
             dbl_click_cb: None,
@@ -201,6 +138,119 @@ impl Chart {
             prev_visible_logical_range: None,
             prev_chart_size: None,
         }
+    }
+
+    // ── Safe Rust SDK methods ─────────────────────────────────
+    //
+    // These provide an idiomatic Rust API without unsafe C-ABI calls.
+    // Rust consumers use these directly; C-ABI functions wrap them.
+
+    /// Render the chart unconditionally.
+    pub fn render(&mut self) {
+        let mask = self.state.consume_mask();
+        let level = mask.global_level();
+        let effective_level = if level == crate::invalidation::InvalidationLevel::None {
+            crate::invalidation::InvalidationLevel::Full
+        } else {
+            level
+        };
+        self.renderer.render(&mut self.state, effective_level);
+        fire_change_events(self);
+    }
+
+    /// Render only if the invalidation mask says a redraw is needed.
+    /// Returns true if a render was performed.
+    pub fn render_if_needed(&mut self) -> bool {
+        let mask = self.state.consume_mask();
+        if !mask.needs_redraw() {
+            self.state.skipped_render_count += 1;
+            return false;
+        }
+        self.renderer.render(&mut self.state, mask.global_level());
+        fire_change_events(self);
+        true
+    }
+
+    /// Resize the chart viewport.
+    pub fn resize(&mut self, width: u32, height: u32, scale_factor: f64) {
+        self.state.resize(width as f32, height as f32, scale_factor);
+        self.renderer.resize(width, height, scale_factor);
+    }
+
+    /// Handle a pointer/mouse move. Returns true if a redraw is needed.
+    pub fn pointer_move(&mut self, x: f32, y: f32) -> bool {
+        self.state.pointer_move(x, y)
+    }
+
+    /// Handle a pointer/mouse button press. Returns true if a redraw is needed.
+    pub fn pointer_down(&mut self, x: f32, y: f32, button: u8) -> bool {
+        self.state.pointer_down(x, y, button)
+    }
+
+    /// Handle a pointer/mouse button release. Returns true if a redraw is needed.
+    pub fn pointer_up(&mut self, x: f32, y: f32, button: u8) -> bool {
+        self.state.pointer_up(x, y, button)
+    }
+
+    /// Handle pointer leaving the chart area. Returns true if a redraw is needed.
+    pub fn pointer_leave(&mut self) -> bool {
+        self.state.pointer_leave()
+    }
+
+    /// Handle a scroll/wheel event. Returns true if a redraw is needed.
+    pub fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        self.state.scroll(dx, dy)
+    }
+
+    /// Handle a keyboard key-down event. Returns true if a redraw is needed.
+    pub fn key_down(&mut self, key_code: u32) -> bool {
+        let key = crate::chart_state::ChartKey::from_code(key_code);
+        self.state.key_down(key)
+    }
+
+    /// Fit all data into the visible viewport.
+    pub fn fit_content(&mut self) {
+        self.state.fit_content();
+    }
+
+    /// Switch the primary series rendering type (0=OHLC, 1=Candle, 2=Line, 3=Area, 4=Hist, 5=Baseline).
+    pub fn set_series_type(&mut self, type_index: u32) {
+        self.state.active_series_type = match type_index {
+            0 => crate::series::SeriesType::Ohlc,
+            1 => crate::series::SeriesType::Candlestick,
+            2 => crate::series::SeriesType::Line,
+            3 => crate::series::SeriesType::Area,
+            4 => crate::series::SeriesType::Histogram,
+            5 => crate::series::SeriesType::Baseline,
+            _ => return,
+        };
+        self.state
+            .pending_mask
+            .set_global(crate::invalidation::InvalidationLevel::Full);
+    }
+
+    /// Set OHLC bar data from a flat array of (time, O, H, L, C) tuples.
+    /// The slice length must be a multiple of 5.
+    pub fn set_data_from_slice(&mut self, flat_data: &[f64]) {
+        let count = flat_data.len() / 5;
+        let bars: Vec<crate::chart_model::OhlcBar> = (0..count)
+            .map(|i| {
+                let base = i * 5;
+                crate::chart_model::OhlcBar {
+                    time: flat_data[base] as i64,
+                    open: flat_data[base + 1],
+                    high: flat_data[base + 2],
+                    low: flat_data[base + 3],
+                    close: flat_data[base + 4],
+                }
+            })
+            .collect();
+        self.state.set_data(bars);
+    }
+
+    /// Set OHLC bar data directly.
+    pub fn set_data(&mut self, bars: Vec<crate::chart_model::OhlcBar>) {
+        self.state.set_data(bars);
     }
 }
 
@@ -279,66 +329,14 @@ pub extern "C" fn chart_create(
             .expect("Failed to create wgpu surface from native view handle")
     };
 
-    let chart = Chart::init_with_surface(instance, surface, width, height, scale_factor);
+    let pipeline = VelloRenderer::new(instance, surface, width, height, scale_factor);
+    let chart = Chart::new_with_renderer(Box::new(pipeline), width, height, scale_factor);
     Box::into_raw(Box::new(chart))
 }
 
 /// Internal render implementation shared by both explicit and conditional paths.
 fn render_internal(chart: &mut Chart, level: crate::invalidation::InvalidationLevel) {
-    chart.backend.reset();
-
-    if level.needs_bottom_scene() {
-        // Light or Full — rebuild the bottom scene via backend
-        let mut bottom_backend = VelloBackend::new();
-        render_bottom_scene(&mut bottom_backend, &chart.state);
-        let bottom_scene = bottom_backend.scene;
-        chart.backend.scene_mut().append(&bottom_scene, None);
-        chart.cached_bottom_scene = Some(bottom_scene);
-        chart.state.bottom_render_count += 1;
-    } else if let Some(ref cached) = chart.cached_bottom_scene {
-        // Cursor only — reuse cached bottom scene
-        chart.backend.scene_mut().append(cached, None);
-    } else {
-        // No cache yet — must do full render
-        let mut bottom_backend = VelloBackend::new();
-        render_bottom_scene(&mut bottom_backend, &chart.state);
-        let bottom_scene = bottom_backend.scene;
-        chart.backend.scene_mut().append(&bottom_scene, None);
-        chart.cached_bottom_scene = Some(bottom_scene);
-        chart.state.bottom_render_count += 1;
-    }
-
-    // Always render crosshair on top
-    render_crosshair_scene(&mut chart.backend, &chart.state);
-    chart.state.crosshair_render_count += 1;
-
-    let surface_texture = match chart.surface.get_current_texture() {
-        Ok(t) => t,
-        Err(e) => {
-            log::error!("Failed to get surface texture: {}", e);
-            return;
-        }
-    };
-
-    let render_params = vello::RenderParams {
-        base_color: vello::peniko::Color::BLACK,
-        width: chart.surface_config.width,
-        height: chart.surface_config.height,
-        antialiasing_method: AaConfig::Area,
-    };
-
-    chart
-        .vello_renderer
-        .render_to_surface(
-            &chart.device,
-            &chart.queue,
-            chart.backend.scene(),
-            &surface_texture,
-            &render_params,
-        )
-        .expect("Vello render failed");
-
-    surface_texture.present();
+    chart.renderer.render(&mut chart.state, level);
 
     // Fire any range/size change callbacks
     fire_change_events(chart);
@@ -396,16 +394,7 @@ pub extern "C" fn chart_resize(chart: *mut Chart, width: u32, height: u32, scale
         .state
         .resize(width as f32, height as f32, scale_factor);
 
-    let physical_width = (width as f64 * scale_factor) as u32;
-    let physical_height = (height as f64 * scale_factor) as u32;
-
-    if physical_width > 0 && physical_height > 0 {
-        chart.surface_config.width = physical_width;
-        chart.surface_config.height = physical_height;
-        chart
-            .surface
-            .configure(&chart.device, &chart.surface_config);
-    }
+    chart.renderer.resize(width, height, scale_factor);
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), no_mangle)]
@@ -440,9 +429,19 @@ pub extern "C" fn chart_pointer_move(chart: *mut Chart, x: f32, y: f32) -> bool 
             .and_then(|i| chart.state.data.bars.get(i))
             .map(|b| b.time)
             .unwrap_or(0);
-        let price = chart.state.panes[0]
+        let pane_idx = chart.state.pane_index_for_point(y);
+        let price = chart.state.panes[pane_idx]
             .price_scale
-            .y_to_price(y, &chart.state.panes[0].layout_rect);
+            .y_to_price(y, &chart.state.panes[pane_idx].layout_rect);
+
+        // Count series with data at this crosshair position
+        let series_count = chart
+            .state
+            .series
+            .series
+            .iter()
+            .filter(|s| s.visible && !s.data.is_empty())
+            .count() as u32;
 
         let param = ChartEventParam {
             time,
@@ -450,6 +449,9 @@ pub extern "C" fn chart_pointer_move(chart: *mut Chart, x: f32, y: f32) -> bool 
             point_x: x,
             point_y: y,
             price,
+            pane_index: pane_idx as u32,
+            hovered_series_id: 0, // TODO: implement hit-test for hovered series
+            series_count,
         };
         cb(&param, user_data);
     }
@@ -488,9 +490,18 @@ pub extern "C" fn chart_pointer_up(chart: *mut Chart, x: f32, y: f32, button: u8
                 .and_then(|i| chart.state.data.bars.get(i))
                 .map(|b| b.time)
                 .unwrap_or(0);
-            let price = chart.state.panes[0]
+            let pane_idx = chart.state.pane_index_for_point(y);
+            let price = chart.state.panes[pane_idx]
                 .price_scale
-                .y_to_price(y, &chart.state.panes[0].layout_rect);
+                .y_to_price(y, &chart.state.panes[pane_idx].layout_rect);
+
+            let series_count = chart
+                .state
+                .series
+                .series
+                .iter()
+                .filter(|s| s.visible && !s.data.is_empty())
+                .count() as u32;
 
             let param = ChartEventParam {
                 time,
@@ -498,6 +509,9 @@ pub extern "C" fn chart_pointer_up(chart: *mut Chart, x: f32, y: f32, button: u8
                 point_x: x,
                 point_y: y,
                 price,
+                pane_index: pane_idx as u32,
+                hovered_series_id: 0,
+                series_count,
             };
             cb(&param, user_data);
         }
@@ -519,9 +533,18 @@ pub extern "C" fn chart_pointer_up(chart: *mut Chart, x: f32, y: f32, button: u8
                 .and_then(|i| chart.state.data.bars.get(i))
                 .map(|b| b.time)
                 .unwrap_or(0);
-            let price = chart.state.panes[0]
+            let pane_idx = chart.state.pane_index_for_point(y);
+            let price = chart.state.panes[pane_idx]
                 .price_scale
-                .y_to_price(y, &chart.state.panes[0].layout_rect);
+                .y_to_price(y, &chart.state.panes[pane_idx].layout_rect);
+
+            let series_count = chart
+                .state
+                .series
+                .series
+                .iter()
+                .filter(|s| s.visible && !s.data.is_empty())
+                .count() as u32;
 
             let param = ChartEventParam {
                 time,
@@ -529,6 +552,9 @@ pub extern "C" fn chart_pointer_up(chart: *mut Chart, x: f32, y: f32, button: u8
                 point_x: x,
                 point_y: y,
                 price,
+                pane_index: pane_idx as u32,
+                hovered_series_id: 0,
+                series_count,
             };
             cb(&param, user_data);
         }
@@ -1665,7 +1691,7 @@ pub extern "C" fn chart_series_count(chart: *const Chart) -> u32 {
 
 // ----- Pane Management C-ABIs -----
 
-/// Add a new pane to the chart. Returns the pane ID.
+/// Add a new pane to the chart. Returns the pane index (v5 model).
 /// `height_stretch` controls relative height (1.0 = equal to other panes).
 #[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
 pub extern "C" fn chart_add_pane(chart: *mut Chart, height_stretch: f32) -> u32 {
@@ -1676,30 +1702,30 @@ pub extern "C" fn chart_add_pane(chart: *mut Chart, height_stretch: f32) -> u32 
     chart.state.add_pane(height_stretch)
 }
 
-/// Remove a pane by ID. Returns true if removed.
+/// Remove a pane by index (v5 model). Returns true if removed.
 /// Pane 0 (main) cannot be removed. Orphaned series move to pane 0.
 #[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
-pub extern "C" fn chart_remove_pane(chart: *mut Chart, pane_id: u32) -> bool {
+pub extern "C" fn chart_remove_pane(chart: *mut Chart, pane_index: u32) -> bool {
     let chart = unsafe {
         assert!(!chart.is_null());
         &mut *chart
     };
-    chart.state.remove_pane(pane_id)
+    chart.state.remove_pane(pane_index)
 }
 
-/// Move a series to a specific pane (by pane ID).
-/// Returns true if both the series and pane were found.
+/// Move a series to a specific pane by index (v5 model).
+/// Returns true if both the series and pane index are valid.
 #[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
 pub extern "C" fn chart_series_move_to_pane(
     chart: *mut Chart,
     series_id: u32,
-    pane_id: u32,
+    pane_index: u32,
 ) -> bool {
     let chart = unsafe {
         assert!(!chart.is_null());
         &mut *chart
     };
-    chart.state.move_series_to_pane(series_id, pane_id)
+    chart.state.move_series_to_pane(series_id, pane_index)
 }
 
 /// Get the number of panes.
@@ -1712,22 +1738,22 @@ pub extern "C" fn chart_pane_count(chart: *const Chart) -> u32 {
     chart.state.panes.len() as u32
 }
 
-/// Swap two panes by their IDs.
+/// Swap two panes by their indices (v5 model).
 #[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
-pub extern "C" fn chart_swap_panes(chart: *mut Chart, pane_id_a: u32, pane_id_b: u32) -> bool {
+pub extern "C" fn chart_swap_panes(chart: *mut Chart, index_a: u32, index_b: u32) -> bool {
     let chart = unsafe {
         assert!(!chart.is_null());
         &mut *chart
     };
-    chart.state.swap_panes(pane_id_a, pane_id_b)
+    chart.state.swap_panes(index_a, index_b)
 }
 
-/// Get the layout rect of a pane by ID.
+/// Get the layout rect of a pane by index (v5 model).
 /// Returns true if pane exists, writing x/y/width/height to the out pointers.
 #[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
 pub extern "C" fn chart_pane_size(
     chart: *const Chart,
-    pane_id: u32,
+    pane_index: u32,
     out_x: *mut f32,
     out_y: *mut f32,
     out_width: *mut f32,
@@ -1737,7 +1763,7 @@ pub extern "C" fn chart_pane_size(
         assert!(!chart.is_null());
         &*chart
     };
-    if let Some((x, y, w, h)) = chart.state.pane_size(pane_id) {
+    if let Some((x, y, w, h)) = chart.state.pane_size(pane_index) {
         unsafe {
             if !out_x.is_null() {
                 *out_x = x;
@@ -1756,6 +1782,162 @@ pub extern "C" fn chart_pane_size(
     } else {
         false
     }
+}
+
+// ── v5 Series extensions ──
+
+/// Get the pane index for a series. Returns u32::MAX if series not found.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_series_get_pane_index(chart: *const Chart, series_id: u32) -> u32 {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &*chart
+    };
+    chart
+        .state
+        .series
+        .get(series_id)
+        .map(|s| s.pane_index as u32)
+        .unwrap_or(u32::MAX)
+}
+
+/// Get the z-order of a series within its pane. Returns u32::MAX if not found.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_series_order(chart: *const Chart, series_id: u32) -> u32 {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &*chart
+    };
+    if let Some(series) = chart.state.series.get(series_id) {
+        let pane_idx = series.pane_index;
+        // Count how many series in this pane appear before this one
+        let mut order = 0u32;
+        for s in chart.state.series.series.iter() {
+            if s.pane_index == pane_idx {
+                if s.id == series_id {
+                    return order;
+                }
+                order += 1;
+            }
+        }
+    }
+    u32::MAX
+}
+
+/// Set the z-order of a series within its pane. Returns true on success.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_series_set_order(chart: *mut Chart, series_id: u32, order: u32) -> bool {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &mut *chart
+    };
+    // Find the series and its pane
+    let pane_idx = match chart.state.series.get(series_id) {
+        Some(s) => s.pane_index,
+        None => return false,
+    };
+    // Collect indices of series in this pane, in current order
+    let mut pane_series_indices: Vec<usize> = chart
+        .state
+        .series
+        .series
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.pane_index == pane_idx)
+        .map(|(i, _)| i)
+        .collect();
+    // Find current position of the target series in pane ordering
+    let current_pos = pane_series_indices
+        .iter()
+        .position(|&i| chart.state.series.series[i].id == series_id);
+    let current_pos = match current_pos {
+        Some(p) => p,
+        None => return false,
+    };
+    let target_pos = (order as usize).min(pane_series_indices.len() - 1);
+    if current_pos != target_pos {
+        // Remove from current, insert at target
+        let removed = pane_series_indices.remove(current_pos);
+        pane_series_indices.insert(target_pos, removed);
+        // Rebuild the full series vec with this new ordering
+        // (This is a simple approach; could optimize for large collections)
+        let mut reordered = Vec::with_capacity(chart.state.series.series.len());
+        let mut used = vec![false; chart.state.series.series.len()];
+        // First, add non-pane series in original order, interleaving pane series at their positions
+        let mut pane_iter = pane_series_indices.iter();
+        for (i, s) in chart.state.series.series.iter().enumerate() {
+            if s.pane_index == pane_idx {
+                if let Some(&reorder_idx) = pane_iter.next() {
+                    reordered.push(chart.state.series.series[reorder_idx].clone());
+                    used[reorder_idx] = true;
+                }
+            } else {
+                reordered.push(s.clone());
+                used[i] = true;
+            }
+        }
+        chart.state.series.series = reordered;
+        chart
+            .state
+            .pending_mask
+            .set_global(crate::invalidation::InvalidationLevel::Full);
+    }
+    true
+}
+
+// ── v5 Event series data accessor ──
+
+/// Pull-based accessor for per-series values at the current crosshair position.
+/// Call this *inside* a crosshair move callback to get series data without
+/// a separate round-trip.
+///
+/// Returns the number of entries written.
+/// This replaces the old `chart_crosshair_get_series_data` for new consumers.
+#[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
+pub extern "C" fn chart_event_series_data(
+    chart: *const Chart,
+    out_series_ids: *mut u32,
+    out_values: *mut f64,
+    max_count: u32,
+) -> u32 {
+    let chart = unsafe {
+        assert!(!chart.is_null());
+        &*chart
+    };
+    // Delegate to existing crosshair series data logic
+    let crosshair = &chart.state.crosshair;
+    if !crosshair.visible {
+        return 0;
+    }
+    let bar_index = match crosshair.bar_index {
+        Some(idx) => idx,
+        None => return 0,
+    };
+    let time = chart
+        .state
+        .data
+        .bars
+        .get(bar_index)
+        .map(|b| b.time)
+        .unwrap_or(0);
+    let mut count = 0u32;
+    for series in chart.state.series.series.iter() {
+        if count >= max_count {
+            break;
+        }
+        if !series.visible {
+            continue;
+        }
+        let value = series.data.value_at_time(time);
+        if let Some(val) = value {
+            unsafe {
+                *out_series_ids.add(count as usize) = series.id;
+                *out_values.add(count as usize) = val;
+            }
+            count += 1;
+        }
+    }
+    count
 }
 
 // ===================================================================

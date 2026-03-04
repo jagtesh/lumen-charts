@@ -199,6 +199,25 @@ impl SeriesData {
         self.len() == 0
     }
 
+    /// Get the close/value at a given timestamp (binary search).
+    /// Used by chart_event_series_data to look up per-series values at a crosshair position.
+    pub fn value_at_time(&self, time: i64) -> Option<f64> {
+        match self {
+            SeriesData::Ohlc(bars) => bars
+                .binary_search_by_key(&time, |b| b.time)
+                .ok()
+                .map(|i| bars[i].close),
+            SeriesData::Line(pts) => pts
+                .binary_search_by_key(&time, |p| p.time)
+                .ok()
+                .map(|i| pts[i].value),
+            SeriesData::Histogram(pts) => pts
+                .binary_search_by_key(&time, |p| p.time)
+                .ok()
+                .map(|i| pts[i].value),
+        }
+    }
+
     /// Get the close/value at a given index
     pub fn value_at(&self, index: usize) -> Option<f64> {
         match self {
