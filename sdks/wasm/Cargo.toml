@@ -8,7 +8,7 @@ license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/jagtesh/lumen-charts"
 homepage = "https://github.com/jagtesh/lumen-charts"
-publish = false
+publish = true
 [lib]
 crate-type = ["cdylib"]
 
