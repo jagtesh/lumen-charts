@@ -803,29 +803,51 @@ fn draw_line_series(
 
     let (vis_first, vis_last) = state.time_scale.visible_range(plot_area.width);
 
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(line_points.len());
+    // Collect points with their bar index for gap detection
+    let mut indexed_points: Vec<(usize, f64, f64)> = Vec::with_capacity(line_points.len());
     for pt in line_points {
         let bar_idx = match state.time_index_map.get(&pt.time) {
             Some(&idx) => idx,
-            None => continue, // data point has no matching bar on the time axis
+            None => continue,
         };
-        // Skip points outside the visible range (with 1-bar padding)
         if bar_idx + 1 < vis_first || bar_idx > vis_last + 1 {
             continue;
         }
         let x = state.time_scale.index_to_x(bar_idx, plot_area) as f64;
         let y = pane.price_scale.price_to_y(pt.value, plot_area) as f64;
-        points.push((x, y));
+        indexed_points.push((bar_idx, x, y));
     }
 
     let color = opts.color;
     let width = opts.line_width as f64;
-    b.stroke_path(&points, color, width);
+
+    // Break the line into segments at gaps (non-adjacent bar indices).
+    // A gap is when the bar index jumps by more than 1 between consecutive points.
+    let mut segment: Vec<(f64, f64)> = Vec::new();
+    let mut prev_idx: Option<usize> = None;
+
+    for &(bar_idx, x, y) in &indexed_points {
+        if let Some(prev) = prev_idx {
+            if bar_idx > prev + 1 {
+                // Gap detected — flush current segment
+                if segment.len() >= 2 {
+                    b.stroke_path(&segment, color, width);
+                }
+                segment.clear();
+            }
+        }
+        segment.push((x, y));
+        prev_idx = Some(bar_idx);
+    }
+    // Flush final segment
+    if segment.len() >= 2 {
+        b.stroke_path(&segment, color, width);
+    }
 
     // Draw circles at each data point if few enough
-    if opts.point_markers_visible && points.len() < 200 {
+    if opts.point_markers_visible && indexed_points.len() < 200 {
         let radius = opts.point_markers_radius as f64;
-        for &(px, py) in &points {
+        for &(_, px, py) in &indexed_points {
             b.fill_circle(px, py, radius, color);
         }
     }
@@ -856,8 +878,8 @@ fn draw_area_series(
 
     let (vis_first, vis_last) = state.time_scale.visible_range(plot_area.width);
 
-    // 1. Build line points using time_index_map for correct alignment
-    let mut line_pts: Vec<(f64, f64)> = Vec::with_capacity(line_points.len());
+    // Collect points with bar index for gap detection
+    let mut indexed_points: Vec<(usize, f64, f64)> = Vec::with_capacity(line_points.len());
     for pt in line_points {
         let bar_idx = match state.time_index_map.get(&pt.time) {
             Some(&idx) => idx,
@@ -868,34 +890,53 @@ fn draw_area_series(
         }
         let x = state.time_scale.index_to_x(bar_idx, plot_area) as f64;
         let y = pane.price_scale.price_to_y(pt.value, plot_area) as f64;
-        line_pts.push((x, y));
+        indexed_points.push((bar_idx, x, y));
     }
 
-    // 2. Build the fill polygon (line + bottom edge)
     let bottom_y = (plot_area.y + plot_area.height) as f64;
-    let mut fill_pts = line_pts.clone();
-    if let Some(&(last_x, _)) = fill_pts.last() {
-        fill_pts.push((last_x, bottom_y));
+
+    // Helper: render one continuous segment
+    let render_segment = |b: &mut dyn DrawBackend, segment: &[(f64, f64)]| {
+        if segment.len() < 2 {
+            return;
+        }
+        // Build fill polygon
+        let mut fill_pts: Vec<(f64, f64)> = segment.to_vec();
+        if let Some(&(last_x, _)) = fill_pts.last() {
+            fill_pts.push((last_x, bottom_y));
+        }
+        if let Some(&(first_x, _)) = segment.first() {
+            fill_pts.push((first_x, bottom_y));
+        }
+        let lowest_y = segment
+            .iter()
+            .map(|(_, y)| *y)
+            .fold(f64::INFINITY, f64::min);
+
+        b.fill_path_gradient(
+            &fill_pts,
+            lowest_y,
+            bottom_y,
+            &[(opts.top_color, 0.0), (opts.bottom_color, 1.0)],
+        );
+        b.stroke_path(segment, opts.line_color, opts.line_width as f64);
+    };
+
+    // Split into segments at gaps
+    let mut segment: Vec<(f64, f64)> = Vec::new();
+    let mut prev_idx: Option<usize> = None;
+
+    for &(bar_idx, x, y) in &indexed_points {
+        if let Some(prev) = prev_idx {
+            if bar_idx > prev + 1 {
+                render_segment(b, &segment);
+                segment.clear();
+            }
+        }
+        segment.push((x, y));
+        prev_idx = Some(bar_idx);
     }
-    if let Some(&(first_x, _)) = line_pts.first() {
-        fill_pts.push((first_x, bottom_y));
-    }
-
-    let lowest_y = line_pts
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(f64::INFINITY, f64::min);
-
-    // 3. Fill with gradient
-    b.fill_path_gradient(
-        &fill_pts,
-        lowest_y,
-        bottom_y,
-        &[(opts.top_color, 0.0), (opts.bottom_color, 1.0)],
-    );
-
-    // 4. Stroke the line on top
-    b.stroke_path(&line_pts, opts.line_color, opts.line_width as f64);
+    render_segment(b, &segment);
 }
 
 /// Draw a baseline series (filled areas above and below a baseline)
@@ -913,8 +954,8 @@ fn draw_baseline_series(
 
     let base_y = pane.price_scale.price_to_y(opts.base_value, plot_area) as f64;
 
-    // Build line points using time_index_map for correct alignment
-    let mut line_pts: Vec<(f64, f64)> = Vec::with_capacity(line_points.len());
+    // Collect points with bar index for gap detection
+    let mut indexed_points: Vec<(usize, f64, f64)> = Vec::with_capacity(line_points.len());
     for pt in line_points {
         let bar_idx = match state.time_index_map.get(&pt.time) {
             Some(&idx) => idx,
@@ -925,92 +966,113 @@ fn draw_baseline_series(
         }
         let x = state.time_scale.index_to_x(bar_idx, plot_area) as f64;
         let y = pane.price_scale.price_to_y(pt.value, plot_area) as f64;
-        line_pts.push((x, y));
+        indexed_points.push((bar_idx, x, y));
     }
 
-    // Top fill (above baseline → clamped)
-    let mut top_fill: Vec<(f64, f64)> = Vec::new();
-    let mut bottom_fill: Vec<(f64, f64)> = Vec::new();
-
-    for &(x, y) in &line_pts {
-        top_fill.push((x, y.min(base_y)));
-        bottom_fill.push((x, y.max(base_y)));
-    }
-
-    // Close top fill polygon
-    if !top_fill.is_empty() {
-        let mut pts = top_fill.clone();
-        if let Some(&(lx, _)) = pts.last() {
-            pts.push((lx, base_y));
+    // Render one segment's fill and stroke
+    let render_baseline_segment = |b: &mut dyn DrawBackend, seg: &[(f64, f64)]| {
+        if seg.len() < 2 {
+            return;
         }
-        if let Some(&(fx, _)) = pts.first() {
-            pts.push((fx, base_y));
-        }
-        let min_y = pts.iter().map(|(_, y)| *y).fold(f64::INFINITY, f64::min);
-        b.fill_path_gradient(
-            &pts,
-            min_y,
-            base_y,
-            &[
-                (opts.top_fill_color, 0.0),
-                (
-                    Color([
-                        opts.top_fill_color[0],
-                        opts.top_fill_color[1],
-                        opts.top_fill_color[2],
-                        0.0,
-                    ]),
-                    1.0,
-                ),
-            ],
-        );
-    }
 
-    // Close bottom fill polygon
-    if !bottom_fill.is_empty() {
-        let mut pts = Vec::new();
-        if let Some(&(fx, _)) = bottom_fill.first() {
-            pts.push((fx, base_y));
+        let mut top_fill: Vec<(f64, f64)> = Vec::new();
+        let mut bottom_fill: Vec<(f64, f64)> = Vec::new();
+        for &(x, y) in seg {
+            top_fill.push((x, y.min(base_y)));
+            bottom_fill.push((x, y.max(base_y)));
         }
-        pts.extend_from_slice(&bottom_fill);
-        if let Some(&(lx, _)) = bottom_fill.last() {
-            pts.push((lx, base_y));
-        }
-        let max_y = pts
-            .iter()
-            .map(|(_, y)| *y)
-            .fold(f64::NEG_INFINITY, f64::max);
-        b.fill_path_gradient(
-            &pts,
-            base_y,
-            max_y,
-            &[
-                (opts.bottom_fill_color, 0.0),
-                (
-                    Color([
-                        opts.bottom_fill_color[0],
-                        opts.bottom_fill_color[1],
-                        opts.bottom_fill_color[2],
-                        0.0,
-                    ]),
-                    1.0,
-                ),
-            ],
-        );
-    }
 
-    // Stroke line segments with appropriate colors
-    for i in 0..line_pts.len().saturating_sub(1) {
-        let (x0, y0) = line_pts[i];
-        let (x1, y1) = line_pts[i + 1];
-        let mid_y = (y0 + y1) / 2.0;
-        let color = if mid_y <= base_y {
-            opts.top_line_color
-        } else {
-            opts.bottom_line_color
-        };
-        b.stroke_line(x0, y0, x1, y1, color, opts.line_width as f64);
+        // Top fill
+        if !top_fill.is_empty() {
+            let mut pts = top_fill.clone();
+            if let Some(&(lx, _)) = pts.last() {
+                pts.push((lx, base_y));
+            }
+            if let Some(&(fx, _)) = pts.first() {
+                pts.push((fx, base_y));
+            }
+            let min_y = pts.iter().map(|(_, y)| *y).fold(f64::INFINITY, f64::min);
+            b.fill_path_gradient(
+                &pts,
+                min_y,
+                base_y,
+                &[
+                    (opts.top_fill_color, 0.0),
+                    (
+                        Color([
+                            opts.top_fill_color[0],
+                            opts.top_fill_color[1],
+                            opts.top_fill_color[2],
+                            0.0,
+                        ]),
+                        1.0,
+                    ),
+                ],
+            );
+        }
+
+        // Bottom fill
+        if !bottom_fill.is_empty() {
+            let mut pts = Vec::new();
+            if let Some(&(fx, _)) = bottom_fill.first() {
+                pts.push((fx, base_y));
+            }
+            pts.extend_from_slice(&bottom_fill);
+            if let Some(&(lx, _)) = bottom_fill.last() {
+                pts.push((lx, base_y));
+            }
+            let max_y = pts
+                .iter()
+                .map(|(_, y)| *y)
+                .fold(f64::NEG_INFINITY, f64::max);
+            b.fill_path_gradient(
+                &pts,
+                base_y,
+                max_y,
+                &[
+                    (opts.bottom_fill_color, 0.0),
+                    (
+                        Color([
+                            opts.bottom_fill_color[0],
+                            opts.bottom_fill_color[1],
+                            opts.bottom_fill_color[2],
+                            0.0,
+                        ]),
+                        1.0,
+                    ),
+                ],
+            );
+        }
+
+        // Stroke line segments
+        for i in 0..seg.len().saturating_sub(1) {
+            let (x0, y0) = seg[i];
+            let (x1, y1) = seg[i + 1];
+            let mid_y = (y0 + y1) / 2.0;
+            let color = if mid_y <= base_y {
+                opts.top_line_color
+            } else {
+                opts.bottom_line_color
+            };
+            b.stroke_line(x0, y0, x1, y1, color, opts.line_width as f64);
+        }
+    };
+
+    // Split into segments at gaps
+    let mut segment: Vec<(f64, f64)> = Vec::new();
+    let mut prev_idx: Option<usize> = None;
+
+    for &(bar_idx, x, y) in &indexed_points {
+        if let Some(prev) = prev_idx {
+            if bar_idx > prev + 1 {
+                render_baseline_segment(b, &segment);
+                segment.clear();
+            }
+        }
+        segment.push((x, y));
+        prev_idx = Some(bar_idx);
     }
+    render_baseline_segment(b, &segment);
 }
 
 // ---------------------------------------------------------------------------

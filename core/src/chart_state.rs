@@ -2648,4 +2648,112 @@ mod tests {
             x_pane1
         );
     }
+
+    // ========================================================================
+    // Whitespace / Gap Regression Tests
+    // ========================================================================
+
+    #[test]
+    fn test_whitespace_gap_in_series_creates_non_adjacent_indices() {
+        // Bars at times 100, 200, 300, 400, 500
+        let bars = vec![
+            make_bar(100, 50.0),
+            make_bar(200, 60.0),
+            make_bar(300, 70.0),
+            make_bar(400, 80.0),
+            make_bar(500, 90.0),
+        ];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 500.0, 1.0);
+
+        // Add a line series that skips time 300 (creating a gap)
+        let series = crate::series::Series::line(
+            0,
+            vec![
+                crate::series::LineDataPoint {
+                    time: 100,
+                    value: 10.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 200,
+                    value: 20.0,
+                },
+                // Gap at time 300 — series has no data here
+                crate::series::LineDataPoint {
+                    time: 400,
+                    value: 40.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 500,
+                    value: 50.0,
+                },
+            ],
+        );
+        state.add_series(series);
+
+        // Series data point at time 200 maps to index 1
+        // Series data point at time 400 maps to index 3
+        // The bar index gap (1 → 3) is non-adjacent, which the renderer
+        // uses to break the line path (gap detection)
+        let idx_200 = *state.time_index_map.get(&200).unwrap();
+        let idx_400 = *state.time_index_map.get(&400).unwrap();
+        assert!(
+            idx_400 > idx_200 + 1,
+            "indices should be non-adjacent for gap detection: {} and {}",
+            idx_200,
+            idx_400
+        );
+    }
+
+    #[test]
+    fn test_whitespace_only_series_expands_timeline() {
+        let bars = vec![make_bar(100, 50.0), make_bar(300, 70.0)];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 500.0, 1.0);
+        assert_eq!(state.time_points.len(), 2); // 100, 300
+
+        // Add a series with time 200 — fills in the "whitespace" between bars
+        let series = crate::series::Series::line(
+            0,
+            vec![crate::series::LineDataPoint {
+                time: 200,
+                value: 60.0,
+            }],
+        );
+        state.add_series(series);
+        assert_eq!(state.time_points.len(), 3); // 100, 200, 300
+
+        // Index positions are contiguous
+        assert_eq!(*state.time_index_map.get(&100).unwrap(), 0);
+        assert_eq!(*state.time_index_map.get(&200).unwrap(), 1);
+        assert_eq!(*state.time_index_map.get(&300).unwrap(), 2);
+    }
+
+    #[test]
+    fn test_duplicate_timestamps_across_bars_and_series() {
+        // Bars at 100, 200
+        let bars = vec![make_bar(100, 50.0), make_bar(200, 60.0)];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 500.0, 1.0);
+
+        // Add series with overlapping timestamps — should not create duplicates
+        let series = crate::series::Series::line(
+            0,
+            vec![
+                crate::series::LineDataPoint {
+                    time: 100,
+                    value: 10.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 200,
+                    value: 20.0,
+                },
+            ],
+        );
+        state.add_series(series);
+
+        // Timeline should still be just 2 points (deduplication)
+        assert_eq!(state.time_points.len(), 2);
+        assert_eq!(state.time_index_map.len(), 2);
+    }
 }
