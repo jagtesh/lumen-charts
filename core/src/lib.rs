@@ -276,6 +276,7 @@ pub extern "C" fn chart_create(
     scale_factor: f64,
 ) -> *mut Chart {
     env_logger::try_init().ok();
+    let _ = display_handle;
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
@@ -284,42 +285,87 @@ pub extern "C" fn chart_create(
 
     let surface = unsafe {
         let target = match view_kind {
-            ChartViewKind::Metal => wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(view_handle),
+            ChartViewKind::Metal => {
+                #[cfg(any(target_os = "macos", target_os = "ios"))]
+                {
+                    wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(view_handle)
+                }
+                #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+                {
+                    panic!("ChartViewKind::Metal is only supported on Apple targets")
+                }
+            }
             ChartViewKind::Win32 => {
-                let raw_window = rwh::RawWindowHandle::Win32(rwh::Win32WindowHandle::new(
-                    std::num::NonZeroIsize::new(view_handle as isize)
-                        .expect("view_handle (HWND) must not be null"),
-                ));
-                let raw_display = rwh::RawDisplayHandle::Windows(rwh::WindowsDisplayHandle::new());
-                wgpu::SurfaceTargetUnsafe::RawHandle {
-                    raw_display_handle: raw_display,
-                    raw_window_handle: raw_window,
+                #[cfg(target_os = "windows")]
+                {
+                    let raw_window = rwh::RawWindowHandle::Win32(rwh::Win32WindowHandle::new(
+                        std::num::NonZeroIsize::new(view_handle as isize)
+                            .expect("view_handle (HWND) must not be null"),
+                    ));
+                    let raw_display =
+                        rwh::RawDisplayHandle::Windows(rwh::WindowsDisplayHandle::new());
+                    wgpu::SurfaceTargetUnsafe::RawHandle {
+                        raw_display_handle: raw_display,
+                        raw_window_handle: raw_window,
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    panic!("ChartViewKind::Win32 is only supported on Windows")
                 }
             }
             ChartViewKind::X11 => {
-                let raw_window =
-                    rwh::RawWindowHandle::Xlib(rwh::XlibWindowHandle::new(view_handle as u64));
-                let raw_display = rwh::RawDisplayHandle::Xlib(rwh::XlibDisplayHandle::new(
-                    std::ptr::NonNull::new(display_handle),
-                    0,
-                ));
-                wgpu::SurfaceTargetUnsafe::RawHandle {
-                    raw_display_handle: raw_display,
-                    raw_window_handle: raw_window,
+                #[cfg(all(
+                    unix,
+                    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+                ))]
+                {
+                    let raw_window = rwh::RawWindowHandle::Xlib(rwh::XlibWindowHandle::new(
+                        view_handle as usize as std::os::raw::c_ulong,
+                    ));
+                    let raw_display = rwh::RawDisplayHandle::Xlib(rwh::XlibDisplayHandle::new(
+                        std::ptr::NonNull::new(display_handle),
+                        0,
+                    ));
+                    wgpu::SurfaceTargetUnsafe::RawHandle {
+                        raw_display_handle: raw_display,
+                        raw_window_handle: raw_window,
+                    }
+                }
+                #[cfg(not(all(
+                    unix,
+                    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+                )))]
+                {
+                    panic!("ChartViewKind::X11 is only supported on desktop Unix targets")
                 }
             }
             ChartViewKind::Wayland => {
-                let raw_window = rwh::RawWindowHandle::Wayland(rwh::WaylandWindowHandle::new(
-                    std::ptr::NonNull::new(view_handle)
-                        .expect("view_handle (wl_surface) must not be null"),
-                ));
-                let raw_display = rwh::RawDisplayHandle::Wayland(rwh::WaylandDisplayHandle::new(
-                    std::ptr::NonNull::new(display_handle)
-                        .expect("display_handle (wl_display) must not be null"),
-                ));
-                wgpu::SurfaceTargetUnsafe::RawHandle {
-                    raw_display_handle: raw_display,
-                    raw_window_handle: raw_window,
+                #[cfg(all(
+                    unix,
+                    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+                ))]
+                {
+                    let raw_window = rwh::RawWindowHandle::Wayland(rwh::WaylandWindowHandle::new(
+                        std::ptr::NonNull::new(view_handle)
+                            .expect("view_handle (wl_surface) must not be null"),
+                    ));
+                    let raw_display =
+                        rwh::RawDisplayHandle::Wayland(rwh::WaylandDisplayHandle::new(
+                            std::ptr::NonNull::new(display_handle)
+                                .expect("display_handle (wl_display) must not be null"),
+                        ));
+                    wgpu::SurfaceTargetUnsafe::RawHandle {
+                        raw_display_handle: raw_display,
+                        raw_window_handle: raw_window,
+                    }
+                }
+                #[cfg(not(all(
+                    unix,
+                    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+                )))]
+                {
+                    panic!("ChartViewKind::Wayland is only supported on desktop Unix targets")
                 }
             }
         };
