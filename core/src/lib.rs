@@ -1,4 +1,6 @@
 pub mod backends;
+#[cfg(feature = "femtovg-backend")]
+pub mod backend_femtovg;
 pub mod chart_model;
 pub mod chart_options;
 pub mod chart_renderer;

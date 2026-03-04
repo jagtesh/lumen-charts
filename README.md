@@ -45,8 +45,19 @@ possible, making migration straightforward:
 
 ```toml
 [dependencies]
-lumen-charts = "1.1"
+lumen-charts = "2.0.0"
 ```
+
+Optional fallback backend (OpenGL/WebGL via femtovg):
+
+```toml
+[dependencies]
+lumen-charts = { version = "2.0.0", features = ["femtovg-backend"] }
+```
+
+This enables the `femtovg-backend` feature through the umbrella crate as a
+backup path to Vello for environments where compute-shader-based rendering is
+unavailable.
 
 ### Swift (Swift Package Manager)
 
@@ -93,6 +104,19 @@ const chart = await createChart(document.getElementById('container'), { renderer
 
 Available renderers: `'webgpu'` (default), `'canvas2d'`. If `'webgpu'` is requested
 but unavailable, the SDK automatically falls back to `'canvas2d'`.
+
+For WebGL fallback work, you can also enable the `femtovg-backend` feature on the
+WASM crate directly:
+
+```toml
+[dependencies]
+lumen-charts-wasm = { version = "1.0.1", features = ["femtovg-backend"] }
+```
+
+There is no separate root `wasm` feature flag. WASM usage is inferred by target
+(`wasm32`) and by using the `lumen-charts-wasm` crate.
+The default JS API renderer options remain `webgpu` and `canvas2d`; the femtovg
+path is intended as an advanced fallback/backend integration path.
 
 ### C / C++ / Other Languages
 

@@ -235,4 +235,14 @@ impl DrawBackend for FemtovgBackend {
             Err(_) => text.len() as f64 * font_size * 0.6,
         }
     }
+
+    fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        self.canvas.save();
+        self.canvas
+            .intersect_scissor(x as f32, y as f32, w as f32, h as f32);
+    }
+
+    fn restore_clip(&mut self) {
+        self.canvas.restore();
+    }
 }
