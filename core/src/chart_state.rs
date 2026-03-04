@@ -595,17 +595,40 @@ impl ChartState {
 
         if in_plot {
             self.active_pane = self.pane_index_for_point(y);
-            self.crosshair.visible = true;
-            self.crosshair.x = x;
-            self.crosshair.y = y;
-            self.crosshair.bar_index = self
-                .time_scale
-                .x_to_nearest_index(x, &self.layout.plot_area);
-            self.crosshair.price = Some(
-                self.panes[self.active_pane]
-                    .price_scale
-                    .y_to_price(y, &self.panes[self.active_pane].layout_rect),
-            );
+
+            // Check crosshair mode
+            match self.options.crosshair.mode {
+                crate::chart_options::CrosshairMode::Hidden => {
+                    self.crosshair.visible = false;
+                    // Still handle drag panning below
+                }
+                mode => {
+                    self.crosshair.visible = true;
+                    self.crosshair.x = x;
+                    self.crosshair.y = y;
+                    self.crosshair.bar_index = self
+                        .time_scale
+                        .x_to_nearest_index(x, &self.layout.plot_area);
+
+                    // Magnet mode: snap Y to nearest bar close price
+                    if mode == crate::chart_options::CrosshairMode::Magnet {
+                        if let Some(idx) = self.crosshair.bar_index {
+                            if idx < self.data.bars.len() {
+                                let snap_price = self.data.bars[idx].close;
+                                let pane = &self.panes[self.active_pane];
+                                self.crosshair.y =
+                                    pane.price_scale.price_to_y(snap_price, &pane.layout_rect);
+                            }
+                        }
+                    }
+
+                    self.crosshair.price =
+                        Some(self.panes[self.active_pane].price_scale.y_to_price(
+                            self.crosshair.y,
+                            &self.panes[self.active_pane].layout_rect,
+                        ));
+                }
+            }
 
             // Handle drag panning (plot area drag)
             if self.drag.active {

@@ -75,6 +75,23 @@ impl Default for GridOptions {
     }
 }
 
+/// Crosshair mode (LWC v5: CrosshairMode)
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum CrosshairMode {
+    /// Free-floating crosshair (default)
+    Normal,
+    /// Snap Y to nearest OHLC close value
+    Magnet,
+    /// No crosshair lines drawn
+    Hidden,
+}
+
+impl Default for CrosshairMode {
+    fn default() -> Self {
+        CrosshairMode::Normal
+    }
+}
+
 /// Crosshair options
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -82,6 +99,7 @@ pub struct CrosshairOptions {
     pub visible: bool,
     pub color: Color,
     pub line_width: f32,
+    pub mode: CrosshairMode,
 }
 
 impl Default for CrosshairOptions {
@@ -90,6 +108,7 @@ impl Default for CrosshairOptions {
             visible: true,
             color: ColorName::LightGray.color().with_alpha(0.8),
             line_width: 1.0,
+            mode: CrosshairMode::Normal,
         }
     }
 }
