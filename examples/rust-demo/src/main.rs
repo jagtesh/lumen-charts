@@ -296,20 +296,32 @@ impl AppState {
             Err(_) => return,
         };
 
-        // --- Render chart via Vello (bypasses chart_render to avoid double-acquire) ---
+        // --- Render chart via Vello (invalidation-aware caching) ---
         {
             use lumen_charts::backends::VelloBackend;
             use lumen_charts::chart_renderer::{render_bottom_scene, render_crosshair_scene};
 
             pipeline.backend.reset();
 
-            let mut bottom_backend = VelloBackend::new();
-            render_bottom_scene(&mut bottom_backend, &inner.state);
-            let bottom_scene = bottom_backend.scene;
-            pipeline.backend.scene_mut().append(&bottom_scene, None);
-            pipeline.cached_bottom_scene = Some(bottom_scene);
+            // Only rebuild bottom scene when chart state has changed (Light/Full).
+            // On cursor-only or no-change frames, reuse the cached scene.
+            let level = inner.state.invalidation_level();
+            if level.needs_bottom_scene() || pipeline.cached_bottom_scene.is_none() {
+                let mut bottom_backend = VelloBackend::new();
+                render_bottom_scene(&mut bottom_backend, &inner.state);
+                let bottom_scene = bottom_backend.scene;
+                pipeline.backend.scene_mut().append(&bottom_scene, None);
+                pipeline.cached_bottom_scene = Some(bottom_scene);
+                inner.state.bottom_render_count += 1;
+            } else if let Some(ref cached) = pipeline.cached_bottom_scene {
+                pipeline.backend.scene_mut().append(cached, None);
+            }
 
             render_crosshair_scene(&mut pipeline.backend, &inner.state);
+            inner.state.crosshair_render_count += 1;
+
+            // Consume the invalidation mask so it resets for the next frame
+            let _ = inner.state.consume_mask();
 
             let render_params = vello::RenderParams {
                 base_color: vello::peniko::Color::BLACK,

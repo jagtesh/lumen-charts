@@ -3,6 +3,7 @@
 /// WASM-only: uses web_sys::CanvasRenderingContext2d for rendering.
 /// Follows fancy-canvas patterns: bitmap vs media coordinate spaces,
 /// ctx.save()/restore() for coordinate switches, proper HiDPI handling.
+use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use web_sys::CanvasRenderingContext2d;
 
@@ -15,6 +16,9 @@ pub struct Canvas2DBackend {
     height: f64,
     scale_x: f64,
     scale_y: f64,
+    // Offscreen canvas for cached bottom scene (fancy-canvas pattern)
+    cached_canvas: Option<web_sys::OffscreenCanvas>,
+    cached_ctx: Option<web_sys::OffscreenCanvasRenderingContext2d>,
 }
 
 impl Canvas2DBackend {
@@ -26,12 +30,71 @@ impl Canvas2DBackend {
             height: 0.0,
             scale_x: 1.0,
             scale_y: 1.0,
+            cached_canvas: None,
+            cached_ctx: None,
         }
     }
 
     /// Get the underlying context for direct access if needed.
     pub fn context(&self) -> &CanvasRenderingContext2d {
         &self.ctx
+    }
+
+    /// Ensure the offscreen canvas exists and matches the current bitmap size.
+    fn ensure_offscreen(&mut self) {
+        let bw = (self.width * self.scale_x) as u32;
+        let bh = (self.height * self.scale_y) as u32;
+
+        let needs_create = match &self.cached_canvas {
+            Some(c) => c.width() != bw || c.height() != bh,
+            None => true,
+        };
+
+        if needs_create {
+            let canvas = web_sys::OffscreenCanvas::new(bw.max(1), bh.max(1))
+                .expect("Failed to create OffscreenCanvas");
+            let ctx = canvas
+                .get_context("2d")
+                .unwrap()
+                .unwrap()
+                .dyn_into::<web_sys::OffscreenCanvasRenderingContext2d>()
+                .unwrap();
+            self.cached_canvas = Some(canvas);
+            self.cached_ctx = Some(ctx);
+        }
+    }
+
+    /// Snapshot the current main canvas content to the offscreen cache.
+    /// Call this after rendering the bottom scene to freeze it for reuse.
+    pub fn snapshot_to_cache(&mut self) {
+        self.ensure_offscreen();
+        if let Some(ref ctx) = self.cached_ctx {
+            // Get the main canvas element from the 2d context
+            let main_canvas = self.ctx.canvas().unwrap();
+            ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+            ctx.draw_image_with_html_canvas_element(&main_canvas, 0.0, 0.0)
+                .ok();
+        }
+    }
+
+    /// Begin an overlay frame — sets up scaling WITHOUT clearing the canvas.
+    /// Use this to composite crosshair on top of an existing bottom scene.
+    pub fn begin_overlay_frame(&mut self, width: f64, height: f64) {
+        self.width = width;
+        self.height = height;
+        // Don't clear — just set up the scale transform for drawing
+        self.ctx.save();
+        self.ctx.scale(self.scale_x, self.scale_y).ok();
+    }
+
+    /// Blit the cached offscreen canvas onto the main canvas.
+    pub fn blit_cached(&mut self) {
+        if let Some(ref canvas) = self.cached_canvas {
+            self.ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+            self.ctx
+                .draw_image_with_offscreen_canvas(canvas, 0.0, 0.0)
+                .ok();
+        }
     }
 }
 

@@ -117,13 +117,15 @@ pub fn render_bottom_scene(b: &mut impl DrawBackend, state: &ChartState) {
         }
     }
 
-    // Overlays on top of bars
+    // Draw axis gutters (opaque backgrounds + grid labels) FIRST.
+    // This clips series content that overflows into the gutter area.
+    draw_y_axis(b, state, layout);
+    draw_x_axis(b, &time_ticks, layout);
+
+    // Overlays on top of axes — price line labels render ABOVE grid labels
     draw_price_lines(b, state);
     draw_series_markers(b, state);
     draw_last_value_marker(b, state);
-
-    draw_y_axis(b, state, layout);
-    draw_x_axis(b, &time_ticks, layout);
 }
 
 /// Render only the crosshair layer. This is cheap — just 2 dashed lines + labels.
@@ -334,6 +336,11 @@ fn draw_y_axis(
     state: &ChartState,
     layout: &crate::chart_model::ChartLayout,
 ) {
+    // Opaque background for the entire Y-axis gutter (clips series overflow)
+    let gutter_x = (layout.plot_area.x + layout.plot_area.width) as f64;
+    let gutter_w = layout.margins.right as f64;
+    b.fill_rect(gutter_x, 0.0, gutter_w, layout.height as f64, BG_COLOR);
+
     let x_start = (layout.plot_area.x + layout.plot_area.width + 5.0) as f64;
     let sf = layout.scale_factor;
 
@@ -364,6 +371,12 @@ fn draw_x_axis(
     layout: &crate::chart_model::ChartLayout,
 ) {
     let plot = &layout.plot_area;
+
+    // Opaque background for the entire X-axis gutter (clips series overflow)
+    let gutter_y = (plot.y + plot.height) as f64;
+    let gutter_h = layout.margins.bottom as f64;
+    b.fill_rect(0.0, gutter_y, layout.width as f64, gutter_h, BG_COLOR);
+
     let y_start = (plot.y + plot.height + 5.0) as f64;
     let sf = layout.scale_factor;
 

@@ -38,6 +38,8 @@ js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "CanvasRenderingContext2d",
     "HtmlCanvasElement",
+    "OffscreenCanvas",
+    "OffscreenCanvasRenderingContext2d",
     "TextMetrics",
     "CanvasGradient",
     "Document",

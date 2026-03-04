@@ -1,8 +1,9 @@
 /// Canvas2DRenderer — immediate-mode Renderer for browser Canvas 2D API.
 ///
-/// WASM-only. Every render call draws directly to the canvas.
-/// No scene caching — Canvas 2D is fast enough for chart rendering
-/// without compositional optimizations.
+/// Uses offscreen canvas caching (fancy-canvas pattern):
+/// - Bottom scene renders to main canvas, then gets copied to an offscreen cache
+/// - On cursor-only frames, the cached bitmap is blitted back instantly
+/// - Crosshair renders on top each frame
 use crate::backends::canvas2d::Canvas2DBackend;
 use crate::chart_renderer::{render_bottom_scene, render_crosshair_scene};
 use crate::chart_state::ChartState;
@@ -30,17 +31,31 @@ impl Renderer for Canvas2DRenderer {
         let w = state.layout.width as f64;
         let h = state.layout.height as f64;
 
-        self.backend.begin_frame(w, h);
-
         if level.needs_bottom_scene() || level >= InvalidationLevel::Light {
+            // Rebuild bottom scene: render to main canvas, then snapshot to offscreen
+            self.backend.begin_frame(w, h);
             render_bottom_scene(&mut self.backend, state);
+            self.backend.end_frame();
+
+            // Snapshot the main canvas content to the offscreen cache
+            self.backend.snapshot_to_cache();
             state.bottom_render_count += 1;
+
+            // Now composite crosshair on top of the bottom scene
+            // (begin a new frame that doesn't clear, but we need the scale)
+            self.backend.begin_overlay_frame(w, h);
+            render_crosshair_scene(&mut self.backend, state);
+            self.backend.end_frame();
+        } else {
+            // Cursor-only: blit cached bottom scene, then draw crosshair on top
+            self.backend.begin_frame(w, h);
+            self.backend.blit_cached();
+            self.backend.begin_overlay_frame(w, h);
+            render_crosshair_scene(&mut self.backend, state);
+            self.backend.end_frame();
         }
 
-        render_crosshair_scene(&mut self.backend, state);
         state.crosshair_render_count += 1;
-
-        self.backend.end_frame();
     }
 
     fn resize(&mut self, width: u32, height: u32, scale_factor: f64) {
