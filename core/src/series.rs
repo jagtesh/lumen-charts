@@ -72,6 +72,23 @@ impl Default for CandlestickOptions {
     }
 }
 
+/// Line interpolation type (LWC v5: LineType)
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum LineType {
+    /// Straight-line segments between points (default)
+    Simple,
+    /// Step function: horizontal then vertical (staircase)
+    WithSteps,
+    /// Smooth curve through points (Catmull-Rom spline)
+    Curved,
+}
+
+impl Default for LineType {
+    fn default() -> Self {
+        LineType::Simple
+    }
+}
+
 /// Options specific to line series
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -81,6 +98,8 @@ pub struct LineSeriesOptions {
     /// Whether to draw circles at each data point
     pub point_markers_visible: bool,
     pub point_markers_radius: f32,
+    /// Interpolation type between points
+    pub line_type: LineType,
 }
 
 impl Default for LineSeriesOptions {
@@ -90,6 +109,7 @@ impl Default for LineSeriesOptions {
             line_width: 2.0,
             point_markers_visible: false,
             point_markers_radius: 3.0,
+            line_type: LineType::Simple,
         }
     }
 }

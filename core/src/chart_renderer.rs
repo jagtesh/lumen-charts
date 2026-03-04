@@ -844,6 +844,7 @@ fn draw_line_series(
 
     let color = opts.color;
     let width = opts.line_width as f64;
+    let line_type = opts.line_type;
 
     // Break the line into segments at gaps (non-adjacent bar indices).
     // A gap is when the bar index jumps by more than 1 between consecutive points.
@@ -854,9 +855,7 @@ fn draw_line_series(
         if let Some(prev) = prev_idx {
             if bar_idx > prev + 1 {
                 // Gap detected — flush current segment
-                if segment.len() >= 2 {
-                    b.stroke_path(&segment, color, width);
-                }
+                flush_line_segment(b, &segment, color, width, line_type);
                 segment.clear();
             }
         }
@@ -864,15 +863,83 @@ fn draw_line_series(
         prev_idx = Some(bar_idx);
     }
     // Flush final segment
-    if segment.len() >= 2 {
-        b.stroke_path(&segment, color, width);
-    }
+    flush_line_segment(b, &segment, color, width, line_type);
 
     // Draw circles at each data point if few enough
     if opts.point_markers_visible && indexed_points.len() < 200 {
         let radius = opts.point_markers_radius as f64;
         for &(_, px, py) in &indexed_points {
             b.fill_circle(px, py, radius, color);
+        }
+    }
+}
+
+/// Flush a line segment with the appropriate interpolation (LineType).
+fn flush_line_segment(
+    b: &mut impl DrawBackend,
+    segment: &[(f64, f64)],
+    color: Color,
+    width: f64,
+    line_type: crate::series::LineType,
+) {
+    if segment.len() < 2 {
+        return;
+    }
+    match line_type {
+        crate::series::LineType::Simple => {
+            b.stroke_path(segment, color, width);
+        }
+        crate::series::LineType::WithSteps => {
+            // Staircase: horizontal then vertical between each pair
+            let mut stepped: Vec<(f64, f64)> = Vec::with_capacity(segment.len() * 2);
+            stepped.push(segment[0]);
+            for i in 1..segment.len() {
+                // Horizontal line to x of next point at current y
+                stepped.push((segment[i].0, segment[i - 1].1));
+                // Vertical line to next point
+                stepped.push(segment[i]);
+            }
+            b.stroke_path(&stepped, color, width);
+        }
+        crate::series::LineType::Curved => {
+            // Catmull-Rom spline approximation: generate intermediate points
+            let mut curved: Vec<(f64, f64)> = Vec::with_capacity(segment.len() * 8);
+            for i in 0..segment.len() - 1 {
+                let p0 = if i > 0 { segment[i - 1] } else { segment[i] };
+                let p1 = segment[i];
+                let p2 = segment[i + 1];
+                let p3 = if i + 2 < segment.len() {
+                    segment[i + 2]
+                } else {
+                    segment[i + 1]
+                };
+
+                // Add start point for first segment
+                if i == 0 {
+                    curved.push(p1);
+                }
+
+                // Generate 8 intermediate points per span
+                let steps = 8;
+                for s in 1..=steps {
+                    let t = s as f64 / steps as f64;
+                    let t2 = t * t;
+                    let t3 = t2 * t;
+                    // Catmull-Rom basis (alpha=0.5)
+                    let x = 0.5
+                        * (2.0 * p1.0
+                            + (-p0.0 + p2.0) * t
+                            + (2.0 * p0.0 - 5.0 * p1.0 + 4.0 * p2.0 - p3.0) * t2
+                            + (-p0.0 + 3.0 * p1.0 - 3.0 * p2.0 + p3.0) * t3);
+                    let y = 0.5
+                        * (2.0 * p1.1
+                            + (-p0.1 + p2.1) * t
+                            + (2.0 * p0.1 - 5.0 * p1.1 + 4.0 * p2.1 - p3.1) * t2
+                            + (-p0.1 + 3.0 * p1.1 - 3.0 * p2.1 + p3.1) * t3);
+                    curved.push((x, y));
+                }
+            }
+            b.stroke_path(&curved, color, width);
         }
     }
 }
