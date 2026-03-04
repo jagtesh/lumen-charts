@@ -5,10 +5,10 @@ GPU-accelerated charting library built on [Vello](https://github.com/linebender/
 The API is designed to stay as close to the original Lightweight Charts API as
 possible, making migration straightforward:
 
-- **Rust SDK** — safe, idiomatic Rust API on the `Chart` struct (no unsafe needed)
+- **Rust SDK** — safe, idiomatic Rust API wrapping `Chart` (macOS, Windows, Linux — no unsafe needed)
 - **Swift SDK** — native API for macOS and iOS (via Metal)
 - **JavaScript API** — available for the WASM target (WebGPU or Canvas 2D)
-- **Windows / Linux** — no high-level SDK yet; use the C-ABI directly
+- **C / C++** — use the C-ABI directly via `chart_core.h`
   (see [Platform Support](#platform-support))
 
 ### Swift Demo (macOS, Metal)
@@ -319,18 +319,21 @@ is chosen at runtime:
 
 | Platform       | GPU Backend | Surface Source           | SDK                        |
 |----------------|-------------|--------------------------|----------------------------|
-| macOS / iOS    | Metal       | `CAMetalLayer`           | ✅ Swift SDK               |
+| macOS / iOS    | Metal       | `CAMetalLayer`           | ✅ Swift SDK, ✅ Rust SDK  |
 | Browser (WASM) | WebGPU      | `<canvas>` element       | ✅ JavaScript API          |
-| Windows        | DX12/Vulkan | `HWND`                   | C-ABI only (no SDK yet)    |
-| Linux          | Vulkan      | Wayland/X11 surface      | C-ABI only (no SDK yet)    |
+| Windows        | DX12/Vulkan | `HWND`                   | ✅ Rust SDK, C-ABI         |
+| Linux          | Vulkan      | Wayland/X11 surface      | ✅ Rust SDK, C-ABI         |
 | Android        | Vulkan      | `ANativeWindow`          | C-ABI only (no SDK yet)    |
 
-For platforms without a dedicated SDK (Windows, Linux, Android), you work with
+The Rust SDK is **Vello-backed** (wgpu → Metal/Vulkan/DX12/WebGPU) and works
+cross-platform out of the box. For WASM, a **Canvas 2D** fallback renderer is
+available; **femtovg** (WebGL2/OpenGL) is planned as an additional cross-platform
+fallback.
+
+For Android or other platforms without a dedicated SDK, you can use
 the low-level C-ABI directly via `chart_core.h`. The full C header is at
 `core/include/chart_core.h`. All `chart_*` functions are platform-agnostic — only
 the initial surface creation call differs per platform.
-
-### Windows (Win32 / HWND)
 
 To embed a chart in a Win32 application, you'd create a `chart_create` variant
 that accepts an `HWND`. The core already links against DX12/Vulkan automatically
