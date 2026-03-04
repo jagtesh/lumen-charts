@@ -284,6 +284,94 @@ impl Overlays {
     pub fn hide_watermark(&mut self) {
         self.watermark.visible = false;
     }
+
+    // --- Markers JSON (moved from C-ABI wrapper) ---
+
+    /// Set markers from a JSON array string.
+    /// JSON format: [{"time":1704153600,"shape":"arrowUp","position":"belowBar",
+    ///   "color":[0.15,0.65,0.6,1.0],"size":8,"text":"Buy"}, ...]
+    pub fn set_markers_from_json(&mut self, json_str: &str) -> bool {
+        let items: Vec<serde_json::Value> = match serde_json::from_str(json_str) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+
+        let mut markers = Vec::with_capacity(items.len());
+        for item in &items {
+            let time = item.get("time").and_then(|v| v.as_i64()).unwrap_or(0);
+            let shape_str = item
+                .get("shape")
+                .and_then(|v| v.as_str())
+                .unwrap_or("circle");
+            let pos_str = item
+                .get("position")
+                .and_then(|v| v.as_str())
+                .unwrap_or("aboveBar");
+
+            let shape = match shape_str {
+                "arrowUp" => MarkerShape::ArrowUp,
+                "arrowDown" => MarkerShape::ArrowDown,
+                "square" => MarkerShape::Square,
+                _ => MarkerShape::Circle,
+            };
+            let position = match pos_str {
+                "belowBar" => MarkerPosition::BelowBar,
+                "atPrice" => MarkerPosition::AtPrice,
+                _ => MarkerPosition::AboveBar,
+            };
+
+            let mut marker = SeriesMarker::new(time, shape, position);
+
+            if let Some(color) = item.get("color").and_then(|v| v.as_array()) {
+                if color.len() == 4 {
+                    marker.color = Color([
+                        color[0].as_f64().unwrap_or(0.0) as f32,
+                        color[1].as_f64().unwrap_or(0.0) as f32,
+                        color[2].as_f64().unwrap_or(0.0) as f32,
+                        color[3].as_f64().unwrap_or(1.0) as f32,
+                    ]);
+                }
+            }
+            if let Some(size) = item.get("size").and_then(|v| v.as_f64()) {
+                marker.size = size as f32;
+            }
+            if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                marker.text = text.to_string();
+            }
+
+            markers.push(marker);
+        }
+
+        self.markers = markers;
+        true
+    }
+
+    /// Serialize markers to a JSON string.
+    pub fn markers_to_json(&self) -> String {
+        let mut arr = Vec::new();
+        for m in &self.markers {
+            let shape_str = match m.shape {
+                MarkerShape::ArrowUp => "arrowUp",
+                MarkerShape::ArrowDown => "arrowDown",
+                MarkerShape::Circle => "circle",
+                MarkerShape::Square => "square",
+            };
+            let pos_str = match m.position {
+                MarkerPosition::AboveBar => "aboveBar",
+                MarkerPosition::BelowBar => "belowBar",
+                MarkerPosition::AtPrice => "atPrice",
+            };
+            arr.push(serde_json::json!({
+                "time": m.time,
+                "shape": shape_str,
+                "position": pos_str,
+                "color": m.color,
+                "size": m.size,
+                "text": m.text,
+            }));
+        }
+        serde_json::to_string(&arr).unwrap_or_else(|_| "[]".to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------

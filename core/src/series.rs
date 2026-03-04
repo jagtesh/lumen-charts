@@ -638,6 +638,24 @@ impl Series {
         }
         false
     }
+
+    /// Serialize the active options for this series to JSON string.
+    /// Matches LWC v5's ISeriesApi.options().
+    pub fn options_json(&self) -> String {
+        match self.series_type {
+            SeriesType::Ohlc | SeriesType::Candlestick => {
+                serde_json::to_string(&self.candlestick_options).unwrap_or_default()
+            }
+            SeriesType::Line => serde_json::to_string(&self.line_options).unwrap_or_default(),
+            SeriesType::Area => serde_json::to_string(&self.area_options).unwrap_or_default(),
+            SeriesType::Histogram => {
+                serde_json::to_string(&self.histogram_options).unwrap_or_default()
+            }
+            SeriesType::Baseline => {
+                serde_json::to_string(&self.baseline_options).unwrap_or_default()
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

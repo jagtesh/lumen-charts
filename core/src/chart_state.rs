@@ -1216,6 +1216,24 @@ impl ChartState {
         self.data.bars.len()
     }
 
+    /// Set the active series type from a numeric code.
+    /// 0=OHLC, 1=Candlestick, 2=Line, 3=Area, 4=Histogram, 5=Baseline.
+    /// Returns true on success, false for invalid codes.
+    pub fn set_series_type(&mut self, code: u32) -> bool {
+        let st = match code {
+            0 => crate::series::SeriesType::Ohlc,
+            1 => crate::series::SeriesType::Candlestick,
+            2 => crate::series::SeriesType::Line,
+            3 => crate::series::SeriesType::Area,
+            4 => crate::series::SeriesType::Histogram,
+            5 => crate::series::SeriesType::Baseline,
+            _ => return false,
+        };
+        self.active_series_type = st;
+        self.pending_mask.set_global(InvalidationLevel::Full);
+        true
+    }
+
     // --- Options ---
 
     /// Apply new chart options. Returns true (always needs redraw).

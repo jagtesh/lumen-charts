@@ -984,20 +984,7 @@ pub extern "C" fn chart_set_series_type(chart: *mut Chart, series_type: u32) -> 
         assert!(!chart.is_null());
         &mut *chart
     };
-    chart.state.active_series_type = match series_type {
-        0 => crate::series::SeriesType::Ohlc,
-        1 => crate::series::SeriesType::Candlestick,
-        2 => crate::series::SeriesType::Line,
-        3 => crate::series::SeriesType::Area,
-        4 => crate::series::SeriesType::Histogram,
-        5 => crate::series::SeriesType::Baseline,
-        _ => return false,
-    };
-    chart
-        .state
-        .pending_mask
-        .set_global(crate::invalidation::InvalidationLevel::Full);
-    true
+    chart.state.set_series_type(series_type)
 }
 
 /// Apply options to the chart globally from a JSON string.
@@ -2421,7 +2408,6 @@ pub extern "C" fn chart_series_set_markers(
         assert!(!chart.is_null());
         &mut *chart
     };
-
     let json_str = unsafe {
         assert!(!markers_json.is_null());
         std::ffi::CStr::from_ptr(markers_json)
@@ -2430,65 +2416,15 @@ pub extern "C" fn chart_series_set_markers(
         Ok(s) => s,
         Err(_) => return false,
     };
-
-    let parsed: Result<Vec<serde_json::Value>, _> = serde_json::from_str(json_str);
-    let items = match parsed {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-
-    let mut markers = Vec::with_capacity(items.len());
-    for item in &items {
-        let time = item.get("time").and_then(|v| v.as_i64()).unwrap_or(0);
-        let shape_str = item
-            .get("shape")
-            .and_then(|v| v.as_str())
-            .unwrap_or("circle");
-        let pos_str = item
-            .get("position")
-            .and_then(|v| v.as_str())
-            .unwrap_or("aboveBar");
-
-        let shape = match shape_str {
-            "arrowUp" => crate::overlays::MarkerShape::ArrowUp,
-            "arrowDown" => crate::overlays::MarkerShape::ArrowDown,
-            "square" => crate::overlays::MarkerShape::Square,
-            _ => crate::overlays::MarkerShape::Circle,
-        };
-        let position = match pos_str {
-            "belowBar" => crate::overlays::MarkerPosition::BelowBar,
-            "atPrice" => crate::overlays::MarkerPosition::AtPrice,
-            _ => crate::overlays::MarkerPosition::AboveBar,
-        };
-
-        let mut marker = crate::overlays::SeriesMarker::new(time, shape, position);
-
-        if let Some(color) = item.get("color").and_then(|v| v.as_array()) {
-            if color.len() == 4 {
-                marker.color = crate::draw_backend::Color([
-                    color[0].as_f64().unwrap_or(0.0) as f32,
-                    color[1].as_f64().unwrap_or(0.0) as f32,
-                    color[2].as_f64().unwrap_or(0.0) as f32,
-                    color[3].as_f64().unwrap_or(1.0) as f32,
-                ]);
-            }
-        }
-        if let Some(size) = item.get("size").and_then(|v| v.as_f64()) {
-            marker.size = size as f32;
-        }
-        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
-            marker.text = text.to_string();
-        }
-
-        markers.push(marker);
+    if chart.state.overlays.set_markers_from_json(json_str) {
+        chart
+            .state
+            .pending_mask
+            .set_global(crate::invalidation::InvalidationLevel::Full);
+        true
+    } else {
+        false
     }
-
-    chart.state.overlays.set_markers(markers);
-    chart
-        .state
-        .pending_mask
-        .set_global(crate::invalidation::InvalidationLevel::Full);
-    true
 }
 
 /// Get markers for a series as a JSON string.
@@ -2502,31 +2438,7 @@ pub extern "C" fn chart_series_markers(
         assert!(!chart.is_null());
         &*chart
     };
-
-    let mut arr = Vec::new();
-    for m in &chart.state.overlays.markers {
-        let shape_str = match m.shape {
-            crate::overlays::MarkerShape::ArrowUp => "arrowUp",
-            crate::overlays::MarkerShape::ArrowDown => "arrowDown",
-            crate::overlays::MarkerShape::Circle => "circle",
-            crate::overlays::MarkerShape::Square => "square",
-        };
-        let pos_str = match m.position {
-            crate::overlays::MarkerPosition::AboveBar => "aboveBar",
-            crate::overlays::MarkerPosition::BelowBar => "belowBar",
-            crate::overlays::MarkerPosition::AtPrice => "atPrice",
-        };
-        arr.push(serde_json::json!({
-            "time": m.time,
-            "shape": shape_str,
-            "position": pos_str,
-            "color": m.color,
-            "size": m.size,
-            "text": m.text,
-        }));
-    }
-
-    let json = serde_json::to_string(&arr).unwrap_or_else(|_| "[]".to_string());
+    let json = chart.state.overlays.markers_to_json();
     std::ffi::CString::new(json).unwrap_or_default().into_raw()
 }
 
@@ -2543,29 +2455,12 @@ pub extern "C" fn chart_series_get_options(
         assert!(!chart.is_null());
         &*chart
     };
-
-    let json = if let Some(series) = chart.state.series.get(series_id) {
-        match series.series_type {
-            crate::series::SeriesType::Ohlc | crate::series::SeriesType::Candlestick => {
-                serde_json::to_string(&series.candlestick_options).unwrap_or_default()
-            }
-            crate::series::SeriesType::Line => {
-                serde_json::to_string(&series.line_options).unwrap_or_default()
-            }
-            crate::series::SeriesType::Area => {
-                serde_json::to_string(&series.area_options).unwrap_or_default()
-            }
-            crate::series::SeriesType::Histogram => {
-                serde_json::to_string(&series.histogram_options).unwrap_or_default()
-            }
-            crate::series::SeriesType::Baseline => {
-                serde_json::to_string(&series.baseline_options).unwrap_or_default()
-            }
-        }
-    } else {
-        "{}".to_string()
-    };
-
+    let json = chart
+        .state
+        .series
+        .get(series_id)
+        .map(|s| s.options_json())
+        .unwrap_or_else(|| "{}".to_string());
     std::ffi::CString::new(json).unwrap_or_default().into_raw()
 }
 
