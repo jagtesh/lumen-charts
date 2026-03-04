@@ -264,6 +264,9 @@ pub struct ChartState {
     /// Sorted unified time points (parallel to time_index_map).
     /// Enables index → time lookup for visible_range to time range conversion.
     pub time_points: Vec<i64>,
+
+    /// Animation frame counter for continuous animations (e.g., last price pulse)
+    pub animation_frame: u64,
 }
 
 impl ChartState {
@@ -310,6 +313,7 @@ impl ChartState {
             touch: TouchState::default(),
             time_index_map: HashMap::new(),
             time_points: Vec::new(),
+            animation_frame: 0,
         };
         state.rebuild_time_index();
         state.update_panes_layout();
@@ -583,6 +587,7 @@ impl ChartState {
         if self.frames_since_last_click <= DBL_CLICK_MAX_FRAMES {
             self.frames_since_last_click += 1;
         }
+        self.animation_frame = self.animation_frame.wrapping_add(1);
     }
 
     // --- Interaction handlers (all return true if redraw needed) ---

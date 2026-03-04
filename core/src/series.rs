@@ -44,6 +44,23 @@ pub struct LineDataPoint {
 // Series options
 // ---------------------------------------------------------------------------
 
+/// Last-price animation mode (LWC v5: LastPriceAnimationMode)
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum LastPriceAnimationMode {
+    /// No animation (default)
+    Disabled,
+    /// Continuously pulsing circle at last price
+    Continuous,
+    /// Pulse only when new data arrives
+    OnDataUpdate,
+}
+
+impl Default for LastPriceAnimationMode {
+    fn default() -> Self {
+        LastPriceAnimationMode::Disabled
+    }
+}
+
 /// Options specific to candlestick series
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -100,6 +117,8 @@ pub struct LineSeriesOptions {
     pub point_markers_radius: f32,
     /// Interpolation type between points
     pub line_type: LineType,
+    /// Last price animation mode
+    pub last_price_animation: LastPriceAnimationMode,
 }
 
 impl Default for LineSeriesOptions {
@@ -110,6 +129,7 @@ impl Default for LineSeriesOptions {
             point_markers_visible: false,
             point_markers_radius: 3.0,
             line_type: LineType::Simple,
+            last_price_animation: LastPriceAnimationMode::Disabled,
         }
     }
 }
