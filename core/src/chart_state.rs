@@ -261,6 +261,9 @@ pub struct ChartState {
     /// Global time index map: timestamp → bar index (mirrors LWC v5 _pointDataByTimePoint).
     /// Used by series renderers to align data points with the shared time axis.
     pub time_index_map: HashMap<i64, usize>,
+    /// Sorted unified time points (parallel to time_index_map).
+    /// Enables index → time lookup for visible_range to time range conversion.
+    pub time_points: Vec<i64>,
 }
 
 impl ChartState {
@@ -306,6 +309,7 @@ impl ChartState {
             skipped_render_count: 0,
             touch: TouchState::default(),
             time_index_map: HashMap::new(),
+            time_points: Vec::new(),
         };
         state.rebuild_time_index();
         state.update_panes_layout();
@@ -350,9 +354,13 @@ impl ChartState {
     /// Update price scale to fit visible data for all panes
     pub fn update_price_scale(&mut self) {
         let (first, last) = self.time_scale.visible_range(self.layout.plot_area.width);
-        if first >= last || last > self.data.bars.len() {
+        if first >= last || last > self.time_points.len() {
             return;
         }
+
+        // Get the visible time range from the unified time points
+        let start_time = self.time_points[first];
+        let end_time = self.time_points[last - 1];
 
         // We need to calculate auto-scale bounds for EACH pane based on the series assigned to it
         for (i, pane) in self.panes.iter_mut().enumerate() {
@@ -363,10 +371,14 @@ impl ChartState {
 
             // Optional: If this is pane 0 and no series exist, it should still scale to the main OHLC data layer for backward compatibility
             if i == 0 {
-                let main_ps = PriceScale::from_data(&self.data.bars[first..last]);
-                min_val = main_ps.min_price;
-                max_val = main_ps.max_price;
-                has_series = true;
+                // Iterate main OHLC bars in the visible time range
+                for bar in &self.data.bars {
+                    if bar.time >= start_time && bar.time <= end_time {
+                        min_val = min_val.min(bar.low);
+                        max_val = max_val.max(bar.high);
+                        has_series = true;
+                    }
+                }
             }
 
             for series in self.series.series.iter() {
@@ -375,10 +387,6 @@ impl ChartState {
                         crate::series::SeriesData::Line(pts) => {
                             let mut s_min = f64::INFINITY;
                             let mut s_max = f64::NEG_INFINITY;
-
-                            // Naive iteration - optimize later
-                            let start_time = self.data.bars[first].time;
-                            let end_time = self.data.bars[last - 1].time;
 
                             for pt in pts.iter() {
                                 if pt.time >= start_time && pt.time <= end_time {
@@ -395,8 +403,6 @@ impl ChartState {
                         crate::series::SeriesData::Ohlc(bars) => {
                             let mut s_min = f64::INFINITY;
                             let mut s_max = f64::NEG_INFINITY;
-                            let start_time = self.data.bars[first].time;
-                            let end_time = self.data.bars[last - 1].time;
                             for b in bars.iter() {
                                 if b.time >= start_time && b.time <= end_time {
                                     s_min = s_min.min(b.low);
@@ -412,8 +418,6 @@ impl ChartState {
                         crate::series::SeriesData::Histogram(pts) => {
                             let mut s_min = f64::INFINITY;
                             let mut s_max = f64::NEG_INFINITY;
-                            let start_time = self.data.bars[first].time;
-                            let end_time = self.data.bars[last - 1].time;
                             for pt in pts.iter() {
                                 if pt.time >= start_time && pt.time <= end_time {
                                     // Histogram scale typically includes 0
@@ -1070,14 +1074,51 @@ impl ChartState {
         self.pending_mask.set_global(InvalidationLevel::Light);
     }
 
-    /// Rebuild the time→bar_index map from current bar data.
-    /// Called after data changes to maintain the global time axis.
+    /// Rebuild the time→global_index map from all data sources (bars + series).
+    /// Mirrors LWC v5's unified time axis: the global timeline is the sorted
+    /// union of all unique timestamps across main OHLC data and every series.
     fn rebuild_time_index(&mut self) {
-        self.time_index_map.clear();
-        self.time_index_map.reserve(self.data.bars.len());
-        for (i, bar) in self.data.bars.iter().enumerate() {
-            self.time_index_map.insert(bar.time, i);
+        // Collect all unique timestamps
+        let mut times: Vec<i64> = Vec::with_capacity(self.data.bars.len());
+        for bar in &self.data.bars {
+            times.push(bar.time);
         }
+        for series in &self.series.series {
+            match &series.data {
+                crate::series::SeriesData::Line(pts) => {
+                    for pt in pts {
+                        times.push(pt.time);
+                    }
+                }
+                crate::series::SeriesData::Ohlc(bars) => {
+                    for b in bars {
+                        times.push(b.time);
+                    }
+                }
+                crate::series::SeriesData::Histogram(pts) => {
+                    for pt in pts {
+                        times.push(pt.time);
+                    }
+                }
+            }
+        }
+
+        // Sort and deduplicate
+        times.sort_unstable();
+        times.dedup();
+
+        // Build the map
+        self.time_index_map.clear();
+        self.time_index_map.reserve(times.len());
+        for (i, t) in times.iter().enumerate() {
+            self.time_index_map.insert(*t, i);
+        }
+
+        // Store the sorted time points for reverse index→time lookup
+        self.time_points = times;
+
+        // Update bar_count to reflect the unified timeline size
+        self.time_scale.bar_count = self.time_points.len();
     }
 
     /// Update or append a single bar (by timestamp).
@@ -1114,6 +1155,7 @@ impl ChartState {
     /// Add a series to the chart. Returns the series ID.
     pub fn add_series(&mut self, series: crate::series::Series) -> u32 {
         let id = self.series.add(series);
+        self.rebuild_time_index();
         self.update_price_scale();
         self.pending_mask.set_global(InvalidationLevel::Full);
         id
@@ -1123,6 +1165,7 @@ impl ChartState {
     pub fn remove_series(&mut self, series_id: u32) -> bool {
         let removed = self.series.remove(series_id);
         if removed {
+            self.rebuild_time_index();
             self.update_price_scale();
             self.pending_mask.set_global(InvalidationLevel::Full);
         }
@@ -1131,6 +1174,7 @@ impl ChartState {
 
     /// Mark that series data was mutated (called after updating series data directly).
     pub fn series_data_changed(&mut self) {
+        self.rebuild_time_index();
         self.update_price_scale();
         self.pending_mask.set_global(InvalidationLevel::Light);
     }
