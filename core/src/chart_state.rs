@@ -2370,4 +2370,282 @@ mod tests {
             panic!("crosshair.price should be Some");
         }
     }
+
+    // ========================================================================
+    // Time Index Map + Unified Time Axis Tests
+    // ========================================================================
+
+    #[test]
+    fn test_time_index_map_matches_bar_times() {
+        let bars = vec![
+            make_bar(100, 50.0),
+            make_bar(200, 60.0),
+            make_bar(300, 70.0),
+        ];
+        let data = ChartData { bars };
+        let state = ChartState::new(data, 800.0, 500.0, 1.0);
+
+        // Every bar time should map to a sequential index
+        assert_eq!(state.time_index_map.get(&100), Some(&0));
+        assert_eq!(state.time_index_map.get(&200), Some(&1));
+        assert_eq!(state.time_index_map.get(&300), Some(&2));
+        assert_eq!(state.time_index_map.len(), 3);
+        assert_eq!(state.time_points.len(), 3);
+    }
+
+    #[test]
+    fn test_unified_time_axis_includes_series_timestamps() {
+        // Create bars at times 100, 200, 300
+        let bars = vec![
+            make_bar(100, 50.0),
+            make_bar(200, 60.0),
+            make_bar(300, 70.0),
+        ];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 500.0, 1.0);
+
+        // Add a line series with a point at time 150 (between bars)
+        let mut series = crate::series::Series::line(
+            0,
+            vec![
+                crate::series::LineDataPoint {
+                    time: 150,
+                    value: 55.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 250,
+                    value: 65.0,
+                },
+            ],
+        );
+        series.pane_index = 0;
+        state.add_series(series);
+
+        // Unified timeline should have 5 points: 100, 150, 200, 250, 300
+        assert_eq!(state.time_points.len(), 5);
+        assert_eq!(state.time_points, vec![100, 150, 200, 250, 300]);
+        assert_eq!(state.time_index_map.get(&100), Some(&0));
+        assert_eq!(state.time_index_map.get(&150), Some(&1));
+        assert_eq!(state.time_index_map.get(&200), Some(&2));
+        assert_eq!(state.time_index_map.get(&250), Some(&3));
+        assert_eq!(state.time_index_map.get(&300), Some(&4));
+        assert_eq!(state.time_scale.bar_count, 5);
+    }
+
+    #[test]
+    fn test_series_data_changed_rebuilds_time_index() {
+        let bars = vec![make_bar(100, 50.0), make_bar(200, 60.0)];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 500.0, 1.0);
+        assert_eq!(state.time_points.len(), 2);
+
+        // Add a series — should rebuild time index
+        let series = crate::series::Series::line(
+            0,
+            vec![crate::series::LineDataPoint {
+                time: 150,
+                value: 55.0,
+            }],
+        );
+        let sid = state.add_series(series);
+        assert_eq!(state.time_points.len(), 3);
+
+        // Mutate series data directly and call series_data_changed
+        if let Some(s) = state.series.series.iter_mut().find(|s| s.id == sid) {
+            s.data = crate::series::SeriesData::Line(vec![
+                crate::series::LineDataPoint {
+                    time: 150,
+                    value: 55.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 175,
+                    value: 57.0,
+                },
+            ]);
+        }
+        state.series_data_changed();
+        assert_eq!(state.time_points.len(), 4); // 100, 150, 175, 200
+    }
+
+    #[test]
+    fn test_remove_series_updates_time_index() {
+        let bars = vec![make_bar(100, 50.0), make_bar(200, 60.0)];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 500.0, 1.0);
+
+        // Add series with extra time point
+        let series = crate::series::Series::line(
+            0,
+            vec![crate::series::LineDataPoint {
+                time: 150,
+                value: 55.0,
+            }],
+        );
+        let sid = state.add_series(series);
+        assert_eq!(state.time_points.len(), 3); // 100, 150, 200
+
+        // Remove series — time 150 should disappear
+        state.remove_series(sid);
+        assert_eq!(state.time_points.len(), 2); // 100, 200
+        assert!(state.time_index_map.get(&150).is_none());
+    }
+
+    // ========================================================================
+    // Multi-Pane Price Scale Isolation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_pane_price_scale_isolation_y_drag() {
+        // Setup: 2 panes, each with different price ranges
+        let bars = vec![make_bar(100, 150.0), make_bar(200, 160.0)];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 600.0, 1.0);
+        state.add_pane(1.0);
+
+        // Add a series to pane 1 with very different values
+        let mut series = crate::series::Series::line(
+            0,
+            vec![
+                crate::series::LineDataPoint {
+                    time: 100,
+                    value: 10.0,
+                },
+                crate::series::LineDataPoint {
+                    time: 200,
+                    value: 20.0,
+                },
+            ],
+        );
+        series.pane_index = 1;
+        state.add_series(series);
+
+        // Record pane 0 and pane 1 price ranges
+        let p0_min = state.panes[0].price_scale.min_price;
+        let p0_max = state.panes[0].price_scale.max_price;
+        let p1_min = state.panes[1].price_scale.min_price;
+        let p1_max = state.panes[1].price_scale.max_price;
+
+        // Verify they are in different ranges
+        assert!(p0_min > 100.0, "pane 0 min should be >100, got {}", p0_min);
+        assert!(p1_max < 100.0, "pane 1 max should be <100, got {}", p1_max);
+
+        // Drag on pane 1's Y-axis (price scale drag)
+        let p1_y = state.panes[1].layout_rect.y + state.panes[1].layout_rect.height / 2.0;
+        let gutter_x = state.layout.plot_area.x + state.layout.plot_area.width + 5.0;
+
+        // Simulate Y-axis drag start on pane 1
+        state.pointer_down(gutter_x, p1_y, 0);
+        state.pointer_move(gutter_x, p1_y + 50.0); // Drag down = zoom out
+
+        // Pane 0's price scale should NOT have changed
+        assert!(
+            (state.panes[0].price_scale.min_price - p0_min).abs() < 1e-6,
+            "pane 0 min changed from {} to {}",
+            p0_min,
+            state.panes[0].price_scale.min_price
+        );
+        assert!(
+            (state.panes[0].price_scale.max_price - p0_max).abs() < 1e-6,
+            "pane 0 max changed from {} to {}",
+            p0_max,
+            state.panes[0].price_scale.max_price
+        );
+    }
+
+    #[test]
+    fn test_pane_price_auto_fit_per_pane() {
+        // Setup: 2 panes
+        let bars = vec![
+            make_bar(100, 1000.0),
+            make_bar(200, 1100.0),
+            make_bar(300, 1200.0),
+        ];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 600.0, 1.0);
+        state.add_pane(1.0);
+
+        // Add histogram series to pane 1 with small values near zero
+        let mut series = crate::series::Series::histogram(
+            0,
+            vec![
+                crate::series::HistogramDataPoint {
+                    time: 100,
+                    value: 5.0,
+                    color: None,
+                },
+                crate::series::HistogramDataPoint {
+                    time: 200,
+                    value: -3.0,
+                    color: None,
+                },
+                crate::series::HistogramDataPoint {
+                    time: 300,
+                    value: 8.0,
+                    color: None,
+                },
+            ],
+        );
+        series.pane_index = 1;
+        state.add_series(series);
+
+        // Pane 0 should be scaled to OHLC range (~1000)
+        let p0_range = state.panes[0].price_scale.max_price - state.panes[0].price_scale.min_price;
+        assert!(
+            p0_range > 100.0,
+            "pane 0 range should be >100 (OHLC ~1000s), got {}",
+            p0_range
+        );
+
+        // Pane 1 should be scaled to histogram range (~-3 to 8)
+        let p1_min = state.panes[1].price_scale.min_price;
+        let p1_max = state.panes[1].price_scale.max_price;
+        assert!(
+            p1_min < 0.0,
+            "pane 1 min should be <0 for histogram, got {}",
+            p1_min
+        );
+        assert!(p1_max < 100.0, "pane 1 max should be <100, got {}", p1_max);
+        assert!(p1_max > 5.0, "pane 1 max should be >5, got {}", p1_max);
+    }
+
+    #[test]
+    fn test_x_axis_zoom_affects_all_panes() {
+        // Setup: 2 panes sharing the time axis
+        let bars = vec![
+            make_bar(100, 150.0),
+            make_bar(200, 160.0),
+            make_bar(300, 170.0),
+        ];
+        let data = ChartData { bars };
+        let mut state = ChartState::new(data, 800.0, 600.0, 1.0);
+        state.add_pane(1.0);
+
+        let original_spacing = state.time_scale.bar_spacing;
+
+        // Zoom out via the time scale (X-axis zoom affects all panes equally)
+        let center_x = state.layout.plot_area.x + state.layout.plot_area.width / 2.0;
+        state
+            .time_scale
+            .zoom(0.5, center_x, &state.layout.plot_area);
+
+        let new_spacing = state.time_scale.bar_spacing;
+        assert!(
+            new_spacing < original_spacing,
+            "zoom out should decrease bar spacing: {} -> {}",
+            original_spacing,
+            new_spacing
+        );
+
+        // Both panes see the same time scale (they share it)
+        // Verify by checking that index_to_x returns same values for both panes
+        let x_pane0 = state.time_scale.index_to_x(1, &state.panes[0].layout_rect);
+        let x_pane1 = state.time_scale.index_to_x(1, &state.panes[1].layout_rect);
+        // X should be the same because both panes have same x, width in their layout_rect
+        assert!(
+            (x_pane0 - x_pane1).abs() < 0.01,
+            "x mismatch between panes: {} vs {}",
+            x_pane0,
+            x_pane1
+        );
+    }
 }
