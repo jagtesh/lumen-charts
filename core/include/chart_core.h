@@ -64,8 +64,8 @@ bool chart_set_crosshair_position(Chart* chart, double price, int64_t time, uint
 bool chart_clear_crosshair_position(Chart* chart);
 
 // Coordinate translation / Read APIs
-float chart_price_to_coordinate(Chart* chart, double price);
-double chart_coordinate_to_price(Chart* chart, float y);
+float chart_price_to_coordinate(Chart* chart, uint32_t pane_index, double price);
+double chart_coordinate_to_price(Chart* chart, uint32_t pane_index, float y);
 float chart_logical_to_coordinate(Chart* chart, double logical);
 double chart_coordinate_to_logical(Chart* chart, float x);
 float chart_time_to_coordinate(Chart* chart, int64_t time);
@@ -185,8 +185,8 @@ uint32_t chart_series_bars_in_logical_range(const Chart* chart, uint32_t series_
 
 // IPriceScaleApi
 bool chart_price_scale_apply_options(Chart* chart, const char* json_cstr);
-float chart_price_scale_width(const Chart* chart);
-const char* chart_price_scale_get_options(const Chart* chart);
+float chart_price_scale_width(const Chart* chart, uint32_t pane_index);
+const char* chart_price_scale_get_options(const Chart* chart, uint32_t pane_index);
 
 // ITimeScaleApi: applyOptions
 bool chart_time_scale_apply_options(Chart* chart, const char* json_cstr);

@@ -384,10 +384,10 @@ pub fn chart_series_apply_options(series_id: u32, json: &str) -> bool {
 // === Coordinate translation ===
 
 #[wasm_bindgen]
-pub fn chart_price_to_coordinate(price: f64) -> f32 { lumen_charts::chart_price_to_coordinate(ptr(), price) }
+pub fn chart_price_to_coordinate(pane_index: u32, price: f64) -> f32 { lumen_charts::chart_price_to_coordinate(ptr(), pane_index, price) }
 
 #[wasm_bindgen]
-pub fn chart_coordinate_to_price(y: f32) -> f64 { lumen_charts::chart_coordinate_to_price(ptr(), y) }
+pub fn chart_coordinate_to_price(pane_index: u32, y: f32) -> f64 { lumen_charts::chart_coordinate_to_price(ptr(), pane_index, y) }
 
 #[wasm_bindgen]
 pub fn chart_time_to_coordinate(time: f64) -> f32 { lumen_charts::chart_time_to_coordinate(ptr(), time as i64) }

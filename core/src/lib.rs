@@ -1114,25 +1114,27 @@ pub extern "C" fn chart_series_remove_price_line(
 // ----- Read & Coordinate Translation APIs -----
 
 #[cfg_attr(not(target_arch = "wasm32"), no_mangle)]
-pub extern "C" fn chart_price_to_coordinate(chart: *mut Chart, price: f64) -> f32 {
+pub extern "C" fn chart_price_to_coordinate(chart: *mut Chart, pane_index: u32, price: f64) -> f32 {
     let chart = unsafe {
         assert!(!chart.is_null());
         &mut *chart
     };
-    chart.state.panes[0]
+    let pi = (pane_index as usize).min(chart.state.panes.len().saturating_sub(1));
+    chart.state.panes[pi]
         .price_scale
-        .price_to_y(price, &chart.state.panes[0].layout_rect)
+        .price_to_y(price, &chart.state.panes[pi].layout_rect)
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), no_mangle)]
-pub extern "C" fn chart_coordinate_to_price(chart: *mut Chart, y: f32) -> f64 {
+pub extern "C" fn chart_coordinate_to_price(chart: *mut Chart, pane_index: u32, y: f32) -> f64 {
     let chart = unsafe {
         assert!(!chart.is_null());
         &mut *chart
     };
-    chart.state.panes[0]
+    let pi = (pane_index as usize).min(chart.state.panes.len().saturating_sub(1));
+    chart.state.panes[pi]
         .price_scale
-        .y_to_price(y, &chart.state.panes[0].layout_rect)
+        .y_to_price(y, &chart.state.panes[pi].layout_rect)
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), no_mangle)]
@@ -2645,11 +2647,12 @@ pub extern "C" fn chart_price_scale_apply_options(
 
 /// Get the width of the price scale in pixels.
 #[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
-pub extern "C" fn chart_price_scale_width(chart: *const Chart) -> f32 {
+pub extern "C" fn chart_price_scale_width(chart: *const Chart, _pane_index: u32) -> f32 {
     let chart = unsafe {
         assert!(!chart.is_null());
         &*chart
     };
+    // Currently all panes share the same right margin width
     chart.state.layout.margins.right
 }
 
@@ -2657,12 +2660,16 @@ pub extern "C" fn chart_price_scale_width(chart: *const Chart) -> f32 {
 /// Returns: {"mode":"normal"|"logarithmic","minPrice":..,"maxPrice":..,"width":..}
 /// Caller must free with chart_free_string.
 #[cfg_attr(not(target_arch = "wasm32"), unsafe(no_mangle))]
-pub extern "C" fn chart_price_scale_get_options(chart: *const Chart) -> *mut std::os::raw::c_char {
+pub extern "C" fn chart_price_scale_get_options(
+    chart: *const Chart,
+    pane_index: u32,
+) -> *mut std::os::raw::c_char {
     let chart = unsafe {
         assert!(!chart.is_null());
         &*chart
     };
-    let ps = &chart.state.panes[0].price_scale;
+    let pi = (pane_index as usize).min(chart.state.panes.len().saturating_sub(1));
+    let ps = &chart.state.panes[pi].price_scale;
     let mode_str = match ps.mode {
         crate::price_scale::PriceScaleMode::Normal => "normal",
         crate::price_scale::PriceScaleMode::Logarithmic => "logarithmic",

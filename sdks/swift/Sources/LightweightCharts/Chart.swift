@@ -360,13 +360,13 @@ public class Chart {
     // MARK: - Coordinate Translation
 
     /// Convert a price value to a Y pixel coordinate
-    public func priceToCoordinate(_ price: Double) -> Float {
-        chart_price_to_coordinate(ptr, price)
+    public func priceToCoordinate(_ price: Double, paneIndex: UInt32 = 0) -> Float {
+        chart_price_to_coordinate(ptr, paneIndex, price)
     }
 
     /// Convert a Y pixel coordinate to a price value
-    public func coordinateToPrice(_ y: Float) -> Double {
-        chart_coordinate_to_price(ptr, y)
+    public func coordinateToPrice(_ y: Float, paneIndex: UInt32 = 0) -> Double {
+        chart_coordinate_to_price(ptr, paneIndex, y)
     }
 
     /// Convert a timestamp to an X pixel coordinate

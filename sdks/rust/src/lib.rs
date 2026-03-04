@@ -538,7 +538,7 @@ impl<'a> PriceScaleApi<'a> {
 
     /// Get the price scale width in pixels.
     pub fn width(&self) -> f32 {
-        unsafe { lumen_charts::chart_price_scale_width(&self.chart.inner as *const Chart) }
+        unsafe { lumen_charts::chart_price_scale_width(&self.chart.inner as *const Chart, 0) }
     }
 
     /// Apply options via JSON.
