@@ -1,7 +1,7 @@
 import AppKit
 import QuartzCore
 import Metal
-import LightweightCharts
+import LumenCharts
 import CChartCore
 
 // ---------------------------------------------------------------------------

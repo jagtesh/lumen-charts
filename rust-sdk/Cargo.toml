@@ -1,6 +1,6 @@
 [package]
 name = "lumen-charts-sdk"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 authors = ["Jagtesh Chadha"]
 description = "Safe, idiomatic Rust SDK for Lumen Charts (v5 API compatible)"
@@ -15,5 +15,5 @@ default = []
 femtovg-backend = ["lumen-charts-core/femtovg-backend"]
 
 [dependencies]
-lumen-charts-core = { path = "../core", version = "2.0.1" }
+lumen-charts-core = { path = "../core", version = "2.0.2" }
 serde_json = "1"

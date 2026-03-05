@@ -69,7 +69,7 @@ if chart.pinch(scale, cx, cy) { chart.render(); }
 Native Swift API for macOS and iOS. Wraps the C-ABI with type-safe handles.
 
 ```swift
-import LightweightCharts
+import LumenCharts
 
 // Create chart (Metal-backed)
 let chart = Chart(

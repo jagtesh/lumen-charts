@@ -22,7 +22,7 @@ let package = Package(
         .executableTarget(
             name: "ChartDemo",
             dependencies: [
-                .product(name: "LightweightCharts", package: "swift"),
+                .product(name: "LumenCharts", package: "swift"),
             ],
             path: "Sources/ChartDemo",
             linkerSettings: [

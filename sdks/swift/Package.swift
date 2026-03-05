@@ -18,7 +18,7 @@ let package = Package(
         .target(
             name: "LumenCharts",
             dependencies: ["CChartCore"],
-            path: "Sources/LightweightCharts"
+            path: "Sources/LumenCharts"
         ),
     ]
 )

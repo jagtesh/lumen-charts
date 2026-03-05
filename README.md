@@ -22,14 +22,19 @@ possible, making migration straightforward:
 ## Project Structure
 
 ```
+├── Cargo.toml          Workspace root + lumen-charts facade crate
+├── src/lib.rs          Facade re-exports (core + sdk)
 ├── core/               Rust core library (rendering, state, C-ABI)
 │   ├── src/            Source code
 │   ├── include/        C header (chart_core.h)
-│   └── target/         Build output (cargo build --release)
+│   ├── fonts/          Bundled fonts
+│   └── tests/          Integration & parity tests
+├── rust-sdk/           Rust SDK crate (lumen-charts-sdk)
+│   └── src/            Safe, idiomatic v5 API wrapping Chart
 ├── sdks/               SDK Reference → [sdks/README.md](sdks/README.md)
-│   ├── rust/           Rust SDK (lumen-charts-sdk crate)
-│   ├── swift/          Swift wrapper (LightweightCharts module)
-│   └── wasm/           WebAssembly bindings + JS API wrapper
+│   ├── rust/           Pointer to ../rust-sdk/
+│   ├── swift/          Swift wrapper (LumenCharts package)
+│   └── wasm/           WebAssembly bindings
 │       ├── src/        wasm-bindgen zero-cost passthrough to C-ABI
 │       └── chart_api.js  Lightweight Charts–style JS API
 └── examples/
@@ -45,7 +50,7 @@ possible, making migration straightforward:
 
 ```toml
 [dependencies]
-lumen-charts = "2.0.0"
+lumen-charts = "2.0.1"
 ```
 
 Optional fallback backend (OpenGL/WebGL via femtovg):
@@ -71,7 +76,7 @@ targets: [
     .target(
         name: "YourApp",
         dependencies: [
-            .product(name: "LightweightCharts", package: "lumen-charts"),
+            .product(name: "LumenCharts", package: "lumen-charts"),
         ]
     ),
 ]
@@ -141,7 +146,7 @@ Release workflow (version bump order, publish order, and breaking-change policy)
 ### Build the Core Library
 
 ```bash
-make core-libs    # builds core/target/release/liblumen_charts.a
+make core-libs    # builds target/release/liblumen_charts_core.a
 ```
 
 ### Run the Swift Demo
