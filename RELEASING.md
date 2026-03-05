@@ -68,7 +68,7 @@ Run from repo root:
 ```bash
 cargo publish -p lumen-charts-core
 cargo publish -p lumen-charts-sdk
-cargo publish -p lumen-charts-wasm
+cargo publish -p lumen-charts-wasm --target wasm32-unknown-unknown
 cargo publish -p lumen-charts
 ```
 
@@ -77,7 +77,7 @@ If you want a dry run first:
 ```bash
 cargo publish -p lumen-charts-core --dry-run
 cargo publish -p lumen-charts-sdk --dry-run
-cargo publish -p lumen-charts-wasm --dry-run
+cargo publish -p lumen-charts-wasm --dry-run --target wasm32-unknown-unknown
 cargo publish -p lumen-charts --dry-run
 ```
 
