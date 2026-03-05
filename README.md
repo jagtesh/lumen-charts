@@ -50,7 +50,7 @@ possible, making migration straightforward:
 
 ```toml
 [dependencies]
-lumen-charts = "2.0.1"
+lumen-charts = "2.0.2"
 ```
 
 Optional fallback backend (OpenGL/WebGL via femtovg):
