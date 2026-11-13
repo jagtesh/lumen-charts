@@ -19,9 +19,10 @@ use lumen_charts::sdk::{
     SeriesDefinition,
 };
 use std::sync::Arc;
+use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
@@ -120,6 +121,7 @@ struct AppState {
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
+    next_repaint: Option<Instant>,
     // Chart state
     current_series_type: usize,
     overlay_active: bool,
@@ -215,6 +217,7 @@ impl AppState {
     }
 
     fn render_egui_and_chart(&mut self) {
+        self.next_repaint = None;
         // Acquire before producing egui texture deltas. An occluded window can
         // skip a frame without losing uploads that egui emits only once.
         let surface_texture = {
@@ -276,6 +279,13 @@ impl AppState {
                 });
             });
         });
+
+        // Only egui's requested repaint delay schedules another frame. A
+        // RedrawRequested input event is not itself a request for a new frame.
+        self.next_repaint = full_output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .and_then(|output| Instant::now().checked_add(output.repaint_delay));
 
         // --- Execute deferred actions ---
         if let Some(idx) = action_set_type {
@@ -488,6 +498,7 @@ impl ApplicationHandler for App {
             egui_ctx,
             egui_state,
             egui_renderer,
+            next_repaint: None,
             current_series_type: 0,
             overlay_active: false,
             overlay_series: None,
@@ -498,6 +509,21 @@ impl ApplicationHandler for App {
             cursor_pos: (0.0, 0.0),
             scale_factor,
         });
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+        match state.next_repaint {
+            Some(deadline) if deadline <= Instant::now() => {
+                state.next_repaint = None;
+                state.window.request_redraw();
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
+            Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
+            None => event_loop.set_control_flow(ControlFlow::Wait),
+        }
     }
 
     fn window_event(
@@ -518,7 +544,10 @@ impl ApplicationHandler for App {
         // egui needs a follow-up frame after consuming input events to process
         // interactions like .clicked() (which triggers on pointer release).
         // Without this redraw, button clicks are lost sporadically.
-        if response.repaint || egui_wants_input {
+        // egui-winit marks RedrawRequested as repaint-worthy. Forwarding that
+        // response back to winit would create an endless redraw feedback loop.
+        if !matches!(event, WindowEvent::RedrawRequested) && (response.repaint || egui_wants_input)
+        {
             state.window.request_redraw();
         }
 
