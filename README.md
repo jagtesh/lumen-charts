@@ -92,7 +92,7 @@ The WASM SDK requires building from source via `wasm-pack`:
 ```bash
 git clone https://github.com/jagtesh/lumen-charts.git
 cd lumen-charts/sdks/wasm
-wasm-pack build --target web
+wasm-pack build --target web --out-name chart_wasm
 ```
 
 This produces a `pkg/` directory you can import in your JavaScript:
@@ -129,11 +129,15 @@ Use the C-ABI directly via the header file. Build the static library and link it
 
 ```bash
 cd core && cargo build --release
-# Link against target/release/liblumen_charts.a (or .dylib / .dll)
+# Link against target/release/liblumen_charts_core.a (or .dylib / .dll)
 # Include core/include/chart_core.h
 ```
 
 ## Quick Start
+
+The checked-in toolchain uses Rust 1.95.0 (required by the Rust demo).
+The core library and SDKs require Rust 1.89 or newer. Swift builds require
+Swift 5.9 or newer. Cargo uses the workspace `Cargo.lock` for reproducible builds.
 
 ```bash
 git clone https://github.com/jagtesh/lumen-charts.git
@@ -185,7 +189,7 @@ make web-canvas-demo  # builds WASM SDK → starts server at http://localhost:80
 ### Run Tests
 
 ```bash
-make test         # runs all 292 tests (unit + integration + parity + C-ABI + DrawBackend)
+make test         # unit + integration + parity + C-ABI + DrawBackend tests
 ```
 
 ## Architecture

@@ -10,7 +10,7 @@ homepage = "https://github.com/jagtesh/lumen-charts"
 readme = "../README.md"
 keywords = ["chart", "gpu", "vello", "wgpu", "trading"]
 categories = ["graphics", "rendering", "visualization"]
-rust-version = "1.75"
+rust-version = "1.89"
 
 [features]
 default = []
@@ -20,17 +20,17 @@ femtovg-backend = ["dep:femtovg"]
 crate-type = ["cdylib", "staticlib", "lib"]
 
 [dependencies]
-vello = "0.9"
-vello_encoding = "0.9"
-skrifa = "0.42"
-parley = "0.10"
+vello = "0.12"
+vello_encoding = "0.12"
+skrifa = "0.50"
+parley = "0.13"
 pollster = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive", "alloc"] }
 serde_json = "1.0"
 log = "0.4"
 env_logger = "0.11"
-femtovg = { version = "0.25", optional = true }
+femtovg = { version = "0.28", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

@@ -10,7 +10,7 @@ let repoRoot = URL(fileURLWithPath: #filePath)
     .path
 
 let libPath = ProcessInfo.processInfo.environment["LUMEN_LIB_PATH"]
-    ?? "\(repoRoot)/core/target/release"
+    ?? "\(repoRoot)/target/release"
 
 let package = Package(
     name: "ChartDemo",
@@ -28,7 +28,7 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags([
                     "-L", libPath,
-                    "-llumen_charts",
+                    "-llumen_charts_core",
                 ]),
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("Metal"),

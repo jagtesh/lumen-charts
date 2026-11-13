@@ -15,7 +15,7 @@ homepage = "https://github.com/jagtesh/lumen-charts"
 readme = "README.md"
 keywords = ["chart", "gpu", "vello", "wgpu", "trading"]
 categories = ["graphics", "rendering", "visualization"]
-rust-version = "1.75"
+rust-version = "1.89"
 
 [features]
 default = []

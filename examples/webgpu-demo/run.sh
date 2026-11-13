@@ -12,7 +12,7 @@ if ! command -v wasm-pack &>/dev/null; then
     exit 1
 fi
 
-wasm-pack build "$WASM_SDK" --target web --out-dir "$PKG_DIR"
+wasm-pack build "$WASM_SDK" --target web --out-name chart_wasm --out-dir "$PKG_DIR"
 
 # Copy the JS wrapper API into the package directory
 cp "$WASM_SDK/chart_api.js" "$PKG_DIR/"

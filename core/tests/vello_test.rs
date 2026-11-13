@@ -4,5 +4,5 @@ fn test() {
         (0.0, Color::new([1.0, 0.0, 0.0, 1.0])),
         (1.0, Color::new([0.0, 0.0, 1.0, 1.0])),
     ]);
-    let b = Brush::Gradient(g);
+    let _b: Brush = Brush::Gradient(g);
 }

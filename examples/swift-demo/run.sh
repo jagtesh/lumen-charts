@@ -19,5 +19,5 @@ cp "$HEADER_SRC" "$HEADER_DST"
 
 echo "==> Building and running Swift demo..."
 cd "$SCRIPT_DIR"
-export LUMEN_LIB_PATH="$CORE_DIR/target/release"
+export LUMEN_LIB_PATH="$REPO_ROOT/target/release"
 swift run ChartDemo

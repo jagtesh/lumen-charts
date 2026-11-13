@@ -57,7 +57,7 @@ swift-demo: core-libs sync-header
 
 .PHONY: wasm-sdk
 wasm-sdk:
-	cd $(WASM_SDK) && wasm-pack build --target web
+	cd $(WASM_SDK) && wasm-pack build --target web --out-name chart_wasm
 
 .PHONY: webgpu-demo
 webgpu-demo: wasm-sdk

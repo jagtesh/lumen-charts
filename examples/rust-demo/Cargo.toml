@@ -2,17 +2,18 @@
 name = "rust-demo"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.95"
 authors = ["Jagtesh Chadha"]
 publish = false
 
 [dependencies]
 lumen-charts = { path = "../..", version = "2.0.2" }
-vello = "0.9"
+vello = "0.12"
 winit = "0.30"
-wgpu = "29"
+wgpu = "30"
 pollster = "0.4"
 log = "0.4"
 env_logger = "0.11"
-egui = "0.34"
-egui-wgpu = "0.34"
-egui-winit = "0.34"
+egui = { version = "0.37", features = ["default_fonts"] }
+egui-wgpu = "0.37"
+egui-winit = "0.37"
