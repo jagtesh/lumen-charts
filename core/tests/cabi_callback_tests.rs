@@ -126,11 +126,11 @@ fn test_markers_json_roundtrip() {
     use lumen_charts_core::overlays::{MarkerPosition, MarkerShape, SeriesMarker};
 
     let markers = vec![
-        SeriesMarker::new(1000, MarkerShape::ArrowUp, MarkerPosition::BelowBar)
+        SeriesMarker::new(0, 1000, MarkerShape::ArrowUp, MarkerPosition::BelowBar)
             .with_color(lumen_charts_core::draw_backend::Color([0.0, 1.0, 0.0, 1.0]))
             .with_text("Buy")
             .with_size(12.0),
-        SeriesMarker::new(2000, MarkerShape::ArrowDown, MarkerPosition::AboveBar)
+        SeriesMarker::new(0, 2000, MarkerShape::ArrowDown, MarkerPosition::AboveBar)
             .with_color(lumen_charts_core::draw_backend::Color([1.0, 0.0, 0.0, 1.0]))
             .with_text("Sell")
             .with_size(10.0),
@@ -150,7 +150,7 @@ fn test_markers_json_roundtrip() {
 
     // Test overlays set/clear
     let mut overlays = lumen_charts_core::overlays::Overlays::new();
-    overlays.set_markers(markers);
+    overlays.set_markers(0, markers);
     assert_eq!(overlays.markers.len(), 2);
     overlays.clear_markers();
     assert!(overlays.markers.is_empty());

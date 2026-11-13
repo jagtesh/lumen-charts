@@ -4,7 +4,8 @@
 *.o
 *.d
 *.dylib
-Cargo.lock
+**/Cargo.lock
+!/Cargo.lock
 pkg/
 www_pkg/
 node_modules/

@@ -4,6 +4,8 @@
 //! C-ABI function from the core library. This eliminates code duplication
 //! and automatically gets invalidation, scene caching, and all new APIs.
 
+#![cfg(target_arch = "wasm32")]
+
 use wasm_bindgen::prelude::*;
 use vello::wgpu;
 use vello::{Renderer as VelloRenderer, RendererOptions};
@@ -49,7 +51,7 @@ pub async fn chart_start() {
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::BROWSER_WEBGPU,
-        ..Default::default()
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
 
     let surface = instance
@@ -66,13 +68,10 @@ pub async fn chart_start() {
         .expect("No WebGPU adapter found");
 
     let (device, queue) = adapter
-        .request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("chart-wasm-device"),
-                ..Default::default()
-            },
-            None,
-        )
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some("chart-wasm-device"),
+            ..Default::default()
+        })
         .await
         .expect("Failed to create device");
 
@@ -93,16 +92,17 @@ pub async fn chart_start() {
         alpha_mode: surface_caps.alpha_modes[0],
         view_formats: vec![],
         desired_maximum_frame_latency: 2,
+        color_space: wgpu::SurfaceColorSpace::Auto,
     };
     surface.configure(&device, &surface_config);
 
     let vello_renderer = VelloRenderer::new(
         &device,
         RendererOptions {
-            surface_format: Some(format),
             use_cpu: false,
             antialiasing_support: vello::AaSupport::area_only(),
             num_init_threads: None,
+            pipeline_cache: None,
         },
     )
     .expect("Failed to create Vello renderer");

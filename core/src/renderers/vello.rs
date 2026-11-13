@@ -22,6 +22,8 @@ pub struct VelloRenderer {
     pub surface_config: wgpu::SurfaceConfiguration,
     pub vello_renderer: VelloRendererInner,
     pub cached_bottom_scene: Option<Scene>,
+    target_view: wgpu::TextureView,
+    blitter: wgpu::util::TextureBlitter,
 }
 
 impl VelloRenderer {
@@ -43,12 +45,10 @@ impl VelloRenderer {
         }))
         .expect("Failed to find a suitable GPU adapter");
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("chart-device"),
-                ..Default::default()
-            },
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("chart-device"),
+            ..Default::default()
+        }))
         .expect("Failed to create GPU device");
 
         let surface_caps = surface.get_capabilities(&adapter);
@@ -71,6 +71,7 @@ impl VelloRenderer {
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
         surface.configure(&device, &surface_config);
 
@@ -85,7 +86,11 @@ impl VelloRenderer {
         )
         .expect("Failed to create Vello renderer");
 
+        let target_view = create_target_view(&device, surface_config.width, surface_config.height);
+        let blitter = wgpu::util::TextureBlitter::new(&device, surface_config.format);
         VelloRenderer {
+            target_view,
+            blitter,
             backend: VelloBackend::new(),
             device,
             queue,
@@ -105,7 +110,11 @@ impl VelloRenderer {
         surface_config: wgpu::SurfaceConfiguration,
         vello_renderer: VelloRendererInner,
     ) -> Self {
+        let target_view = create_target_view(&device, surface_config.width, surface_config.height);
+        let blitter = wgpu::util::TextureBlitter::new(&device, surface_config.format);
         VelloRenderer {
+            target_view,
+            blitter,
             backend: VelloBackend::new(),
             device,
             queue,
@@ -114,6 +123,35 @@ impl VelloRenderer {
             vello_renderer,
             cached_bottom_scene: None,
         }
+    }
+
+    /// Render the current scene, then copy it to the acquired surface view.
+    /// Vello's compute output requires an RGBA storage texture; window surfaces
+    /// generally only support render attachments (and may use BGRA).
+    pub fn render_to_view(&mut self, surface_view: &wgpu::TextureView) {
+        let params = vello::RenderParams {
+            base_color: vello::peniko::Color::BLACK,
+            width: self.surface_config.width,
+            height: self.surface_config.height,
+            antialiasing_method: AaConfig::Area,
+        };
+        self.vello_renderer
+            .render_to_texture(
+                &self.device,
+                &self.queue,
+                self.backend.scene(),
+                &self.target_view,
+                &params,
+            )
+            .expect("Vello render failed");
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("chart-blit"),
+            });
+        self.blitter
+            .copy(&self.device, &mut encoder, &self.target_view, surface_view);
+        self.queue.submit([encoder.finish()]);
     }
 }
 
@@ -155,28 +193,12 @@ impl Renderer for VelloRenderer {
             }
         };
 
-        let render_params = vello::RenderParams {
-            base_color: vello::peniko::Color::BLACK,
-            width: self.surface_config.width,
-            height: self.surface_config.height,
-            antialiasing_method: AaConfig::Area,
-        };
-
         let surface_view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        self.render_to_view(&surface_view);
 
-        self.vello_renderer
-            .render_to_texture(
-                &self.device,
-                &self.queue,
-                self.backend.scene(),
-                &surface_view,
-                &render_params,
-            )
-            .expect("Vello render failed");
-
-        surface_texture.present();
+        self.queue.present(surface_texture);
     }
 
     fn resize(&mut self, width: u32, height: u32, scale_factor: f64) {
@@ -187,6 +209,7 @@ impl Renderer for VelloRenderer {
             self.surface_config.width = physical_width;
             self.surface_config.height = physical_height;
             self.surface.configure(&self.device, &self.surface_config);
+            self.target_view = create_target_view(&self.device, physical_width, physical_height);
         }
     }
 
@@ -197,4 +220,23 @@ impl Renderer for VelloRenderer {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
+}
+
+fn create_target_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("chart-vello-target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default())
 }

@@ -1,5 +1,5 @@
 module CChartCore {
     header "chart_core.h"
-    link "lumen_charts"
+    link "lumen_charts_core"
     export *
 }

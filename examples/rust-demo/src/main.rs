@@ -229,8 +229,8 @@ impl AppState {
 
         // --- egui input + UI layout ---
         let raw_input = self.egui_state.take_egui_input(&self.window);
-        let full_output = self.egui_ctx.run(raw_input, |ctx| {
-            egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+        let full_output = self.egui_ctx.run_ui(raw_input, |ui| {
+            egui::Panel::top("toolbar").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Chart Type:");
                     for (i, name) in SERIES_TYPES.iter().enumerate() {
@@ -329,23 +329,7 @@ impl AppState {
             // Consume the invalidation mask so it resets for the next frame
             let _ = inner.state.consume_mask();
 
-            let render_params = vello::RenderParams {
-                base_color: vello::peniko::Color::BLACK,
-                width: pipeline.surface_config.width,
-                height: pipeline.surface_config.height,
-                antialiasing_method: vello::AaConfig::Area,
-            };
-
-            pipeline
-                .vello_renderer
-                .render_to_texture(
-                    &pipeline.device,
-                    &pipeline.queue,
-                    pipeline.backend.scene(),
-                    &surface_view,
-                    &render_params,
-                )
-                .expect("Vello render failed");
+            pipeline.render_to_view(&surface_view);
         }
 
         // --- Overlay egui on top ---
@@ -364,13 +348,15 @@ impl AppState {
                 .egui_ctx
                 .tessellate(full_output.shapes, full_output.pixels_per_point);
 
-            for (id, image_delta) in &full_output.textures_delta.set {
-                self.egui_renderer.update_texture(
-                    &pipeline.device,
-                    &pipeline.queue,
-                    *id,
-                    image_delta,
-                );
+            for (id, image_deltas) in &full_output.textures_delta.set {
+                for image_delta in image_deltas {
+                    self.egui_renderer.update_texture(
+                        &pipeline.device,
+                        &pipeline.queue,
+                        *id,
+                        image_delta,
+                    );
+                }
             }
 
             let mut encoder =
@@ -417,7 +403,7 @@ impl AppState {
         }
 
         // --- Single present ---
-        surface_texture.present();
+        pipeline.queue.present(surface_texture);
     }
 }
 

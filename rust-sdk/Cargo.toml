@@ -2,6 +2,7 @@
 name = "lumen-charts-sdk"
 version = "1.0.2"
 edition = "2021"
+rust-version = "1.89"
 authors = ["Jagtesh Chadha"]
 description = "Safe, idiomatic Rust SDK for Lumen Charts (v5 API compatible)"
 license = "Apache-2.0"

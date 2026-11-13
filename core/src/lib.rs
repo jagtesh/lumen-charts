@@ -28,10 +28,13 @@ use std::ffi::c_void;
 use crate::chart_model::ChartData;
 use crate::chart_state::ChartState;
 use crate::renderers::Renderer;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::renderers::VelloRenderer;
 
+#[cfg(not(target_arch = "wasm32"))]
 use vello::wgpu;
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use wgpu::rwh;
 
 /// Identifies the type of native view handle passed to `chart_create`.
