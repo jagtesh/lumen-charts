@@ -135,11 +135,12 @@ struct AppState {
 }
 
 impl AppState {
+    // UI actions only mutate state. The composite frame owns surface acquisition
+    // and presentation, so actions must not render a second frame here.
     fn toggle_overlay(&mut self) {
         if let Some(series) = self.overlay_series.take() {
             // Remove the overlay series — safe, no unsafe needed
             self.chart.remove_series(&series);
-            self.chart.render();
             self.overlay_active = false;
         } else {
             // Create an area overlay offset below the main price
@@ -156,7 +157,6 @@ impl AppState {
             let series = self.chart.add_series(SeriesDefinition::Area);
             series.set_line_data(&mut self.chart, &overlay_data);
             self.overlay_series = Some(series);
-            self.chart.render();
             self.overlay_active = true;
         }
     }
@@ -169,7 +169,6 @@ impl AppState {
             }
             self.chart.remove_pane(&pane);
             self.macd_series.clear();
-            self.chart.render();
             self.macd_active = false;
         } else {
             let macd = calculate_macd(&self.sample_bars);
@@ -202,7 +201,6 @@ impl AppState {
 
             self.macd_pane = Some(pane);
             self.macd_series = vec![hist_series, macd_line_series, signal_series];
-            self.chart.render();
             self.macd_active = true;
         }
     }
@@ -210,15 +208,30 @@ impl AppState {
     fn set_series_type(&mut self, type_idx: usize) {
         self.current_series_type = type_idx;
         self.chart.set_series_type(type_idx as u32);
-        self.chart.render();
     }
 
     fn fit_content(&mut self) {
         self.chart.fit_content();
-        self.chart.render();
     }
 
     fn render_egui_and_chart(&mut self) {
+        // Acquire before producing egui texture deltas. An occluded window can
+        // skip a frame without losing uploads that egui emits only once.
+        let surface_texture = {
+            let pipeline = self
+                .chart
+                .inner
+                .renderer
+                .as_any()
+                .downcast_ref::<VelloRenderer>()
+                .expect("Rust demo requires VelloRenderer renderer");
+            match pipeline.surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(t)
+                | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                _ => return,
+            }
+        };
+
         // --- Collect actions ---
         // egui closure borrows fields of self, so we can't call &mut self methods
         // inside it. Instead, collect flags and execute after the closure.
@@ -229,7 +242,7 @@ impl AppState {
 
         // --- egui input + UI layout ---
         let raw_input = self.egui_state.take_egui_input(&self.window);
-        let full_output = self.egui_ctx.run_ui(raw_input, |ui| {
+        let mut full_output = self.egui_ctx.run_ui(raw_input, |ui| {
             egui::Panel::top("toolbar").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Chart Type:");
@@ -290,13 +303,6 @@ impl AppState {
             .downcast_mut::<VelloRenderer>()
             .expect("Rust demo requires VelloRenderer renderer");
 
-        // --- Single surface acquire ---
-        let surface_texture = match pipeline.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-            _ => return,
-        };
-
         // Create the view once — used by both Vello and egui passes.
         let surface_view = surface_texture
             .texture
@@ -348,13 +354,13 @@ impl AppState {
                 .egui_ctx
                 .tessellate(full_output.shapes, full_output.pixels_per_point);
 
-            for (id, image_deltas) in &full_output.textures_delta.set {
+            for (id, image_deltas) in full_output.textures_delta.set.drain() {
                 for image_delta in image_deltas {
                     self.egui_renderer.update_texture(
                         &pipeline.device,
                         &pipeline.queue,
-                        *id,
-                        image_delta,
+                        id,
+                        &image_delta,
                     );
                 }
             }
@@ -397,8 +403,8 @@ impl AppState {
 
             pipeline.queue.submit(std::iter::once(encoder.finish()));
 
-            for id in &full_output.textures_delta.free {
-                self.egui_renderer.free_texture(id);
+            for id in full_output.textures_delta.free.drain() {
+                self.egui_renderer.free_texture(&id);
             }
         }
 
